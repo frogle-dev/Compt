@@ -37,25 +37,24 @@ const UI_Element = struct {
     position: Position,
 };
 
-
 test "spawn" {
     var debug_allocator = std.heap.DebugAllocator(.{}){};
     defer std.debug.assert(debug_allocator.deinit() == .ok);
     const gpa = debug_allocator.allocator();
-    var registry = compt.Registry(.{Player, Tree, UI_Element}).init(gpa);
+    var registry = compt.Registry(.{ Player, Tree, UI_Element }).init(gpa);
     defer registry.deinit();
 
     const player: Player = .{
-        .position = .{.x = 0, .y = 10},
-        .velocity = .{.x = 0, .y = 10},
-        .health   = .{.max = 100, .val = 100},
-        .attack   = .{.val = 15},
+        .position = .{ .x = 0, .y = 10 },
+        .velocity = .{ .x = 0, .y = 10 },
+        .health = .{ .max = 100, .val = 100 },
+        .attack = .{ .val = 15 },
     };
-    const tree: Tree     = .{
-        .position = .{.x = 0, .y = 0},
-        .health = .{.max = 50, .val = 50},
+    const tree: Tree = .{
+        .position = .{ .x = 0, .y = 0 },
+        .health = .{ .max = 50, .val = 50 },
     };
-    const ui: UI_Element = .{.position = .{.x = 0, .y = 100}};
+    const ui: UI_Element = .{ .position = .{ .x = 0, .y = 100 } };
 
     const id0 = try registry.spawn(player);
     const id1 = try registry.spawn(tree);
@@ -69,23 +68,23 @@ test "spawn" {
     try std.testing.expectEqual(3, id3);
 
     // correct storage lengths
-    try std.testing.expectEqual(1, registry.archetypes.@"0".len); // 1 player
-    try std.testing.expectEqual(2, registry.archetypes.@"1".len); // 2 trees
-    try std.testing.expectEqual(1, registry.archetypes.@"2".len); // 1 ui element
+    try std.testing.expectEqual(1, registry.templates.@"0".len); // 1 player
+    try std.testing.expectEqual(2, registry.templates.@"1".len); // 2 trees
+    try std.testing.expectEqual(1, registry.templates.@"2".len); // 1 ui element
 
     // entity_positions recorded correctly
-    try std.testing.expectEqual(0, registry.entity_positions.get(id0).?.archetype_idx);
+    try std.testing.expectEqual(0, registry.entity_positions.get(id0).?.template_idx);
     try std.testing.expectEqual(0, registry.entity_positions.get(id0).?.entity_idx);
-    try std.testing.expectEqual(1, registry.entity_positions.get(id1).?.archetype_idx);
-    try std.testing.expectEqual(1, registry.entity_positions.get(id2).?.archetype_idx);
+    try std.testing.expectEqual(1, registry.entity_positions.get(id1).?.template_idx);
+    try std.testing.expectEqual(1, registry.entity_positions.get(id2).?.template_idx);
     try std.testing.expectEqual(1, registry.entity_positions.get(id2).?.entity_idx);
 
     // data stored correctly
-    const stored_player = registry.archetypes.@"0".get(0);
-    try std.testing.expectEqual(0, stored_player.data.position.x);
-    try std.testing.expectEqual(10, stored_player.data.position.y);
-    try std.testing.expectEqual(100, stored_player.data.health.val);
-    try std.testing.expectEqual(true, stored_player.enabled);
+    const stored_player = registry.templates.@"0".get(0);
+    try std.testing.expectEqual(0, stored_player.position.x);
+    try std.testing.expectEqual(10, stored_player.position.y);
+    try std.testing.expectEqual(100, stored_player.health.val);
+    // try std.testing.expectEqual(true, stored_player.enabled);
 }
 
 test "query" {
@@ -100,26 +99,29 @@ test "query" {
     //     .ReleaseFast, .ReleaseSmall => std.heap.c_allocator,
     // };
 
-    var registry = compt.Registry(.{Player, Tree, UI_Element}).init(gpa);
+    var registry = compt.Registry(.{ Player, Tree, UI_Element }).init(gpa);
     defer registry.deinit();
 
     const player: Player = .{
-        .position = .{.x = 0, .y = 10},
-        .velocity = .{.x = 0, .y = 10},
-        .health   = .{.max = 100, .val = 100},
-        .attack   = .{.val = 15},
+        .position = .{ .x = 0, .y = 10 },
+        .velocity = .{ .x = 0, .y = 10 },
+        .health = .{ .max = 100, .val = 100 },
+        .attack = .{ .val = 15 },
     };
-    const tree: Tree     = .{
-        .position = .{.x = 0, .y = 0},
-        .health = .{.max = 50, .val = 50},
+    const tree: Tree = .{
+        .position = .{ .x = 0, .y = 0 },
+        .health = .{ .max = 50, .val = 50 },
     };
-    const ui: UI_Element = .{.position = .{.x = 0, .y = 100}};
+    const ui: UI_Element = .{ .position = .{ .x = 0, .y = 100 } };
 
     const id0 = try registry.spawn(player);
     const id1 = try registry.spawn(tree);
     const id2 = try registry.spawn(tree);
     const id3 = try registry.spawn(ui);
-    _ = id0; _ = id1; _ = id2; _ = id3;
+    _ = id0;
+    _ = id1;
+    _ = id2;
+    _ = id3;
 
     var q1 = try registry.query(.{Position}, .{}, .{Velocity});
     defer q1.deinit(gpa);
@@ -129,7 +131,7 @@ test "query" {
 
     var q2 = try registry.query(.{Position}, .{}, .{Health});
     defer q2.deinit(gpa);
-    try std.testing.expectEqual(2+4, q2.len);
+    try std.testing.expectEqual(2 + 4, q2.len);
     try std.testing.expectEqual(compt.reg.Component(Position), q2.items[0]);
     try std.testing.expectEqual(compt.reg.Component(Health), q2.items[1]);
     try std.testing.expectEqual(compt.reg.Component(Position), q2.items[2]);
@@ -137,9 +139,13 @@ test "query" {
     try std.testing.expectEqual(compt.reg.Component(Position), q2.items[4]);
     try std.testing.expectEqual(compt.reg.Component(Health), q2.items[5]);
 
-    var q3 = try registry.query(.{Position}, .{}, .{},);
+    var q3 = try registry.query(
+        .{Position},
+        .{},
+        .{},
+    );
     defer q3.deinit(gpa);
-    try std.testing.expectEqual(1+2+1, q3.len);
+    try std.testing.expectEqual(1 + 2 + 1, q3.len);
     try std.testing.expectEqual(compt.reg.Component(Position), q3.items[0]);
     try std.testing.expectEqual(compt.reg.Component(Position), q3.items[1]);
     try std.testing.expectEqual(compt.reg.Component(Position), q3.items[2]);
@@ -147,7 +153,7 @@ test "query" {
 
     var q4 = try registry.query(.{Position}, .{Attack}, .{Health});
     defer q4.deinit(gpa);
-    try std.testing.expect(4+1, q4.len);
+    try std.testing.expect(4 + 1, q4.len);
     try std.testing.expectEqual(compt.reg.Component(Position), q4.items[0]);
     try std.testing.expectEqual(compt.reg.Component(Health), q4.items[1]);
     try std.testing.expectEqual(compt.reg.Component(Position), q4.items[2]);
@@ -155,6 +161,4 @@ test "query" {
     try std.testing.expectEqual(compt.reg.Component(Position), q4.items[4]);
 }
 
-test "system" {
-
-}
+test "system" {}

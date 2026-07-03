@@ -34,13 +34,11 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addImport("Compt", compt_module);
     exe.root_module.addImport("Compt", compt_module);
 
-    b.installArtifact(tests);
     b.installArtifact(exe);
 
     const run_test = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_test.step);
-    // std.debug.print("{}", .{test_step.test_results});
 
     const run = b.addRunArtifact(exe);
     const run_step = b.step("run", "Run executable");

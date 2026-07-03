@@ -1,135 +1,97 @@
 const std = @import("std");
 
-pub const ArchetypeIdx = usize;
+pub const TemplateIdx = usize;
 pub const EntityIdx = usize;
 pub const EntityID = u32;
 
 pub const EntityPosition = struct {
-    archetype_idx: ArchetypeIdx,
+    template_idx: TemplateIdx,
     entity_idx: EntityIdx,
 };
-
-// const ComponentsPosition = struct {
-//     archetype_idx: ArchetypeIdx,
-//     component_name: []const u8,
-//     component_type: type,
-// };
 
 fn RequireStruct(comptime T: type, comptime name: []const u8) void {
     if (@typeInfo(T) != .@"struct")
         @compileError(@typeName(T) ++ " is not a struct: '" ++ name ++ "' must be a struct");
 }
 
-pub fn Component(comptime T: type) type {
-    return struct {
-        data: T,
-        enabled: bool,
-    };
-}
-
-pub fn ComponentizeEntity(comptime )
-
-fn ArchetypeStorage(comptime archetypes: anytype) type {
-    const arch_fields = @typeInfo(@TypeOf(archetypes)).@"struct".fields;
-    comptime var types: [arch_fields.len]type = undefined;
-
-    inline for (arch_fields, 0..) |field, i| {
-        const ArchetypeTemplate = @field(archetypes, field.name);
-
-        const archetype_template_fields = @typeInfo(ArchetypeTemplate).@"struct".fields;
-
-        comptime var names: [archetype_template_fields.len][]const u8 = undefined;
-        comptime var template_types: [archetype_template_fields.len]type = undefined;
-        comptime var attrs: [archetype_template_fields.len]std.builtin.Type.StructField.Attributes = undefined;
-
-        inline for (archetype_template_fields, 0..) |archetype_template_field, template_idx| {
-            names[template_idx] = archetype_template_field.name;
-            template_types[template_idx] = Component(archetype_template_field.type);
-            attrs[template_idx] = std.builtin.Type.StructField.Attributes{
-                .default_value_ptr = archetype_template_field.default_value_ptr,
-                .@"align" = archetype_template_field.alignment,
-                .@"comptime" = archetype_template_field.is_comptime,
-            };
-        }
-
-        const ArchetypeTemplateComponentized = @Struct(.auto, null, &names, &template_types, &attrs);
-
-        types[i] = std.MultiArrayList(ArchetypeTemplateComponentized);
-    }
-
-    return @Tuple(&types);
-}
-
-fn initArchetypeStorage(comptime archetypes: anytype) ArchetypeStorage(archetypes) {
-    var storage: ArchetypeStorage(archetypes) = undefined;
-
-    const fields = @typeInfo(ArchetypeStorage(archetypes)).@"struct".fields;
-    inline for (fields) |field| {
-        @field(storage, field.name) = .{};
-    }
-
-    return storage;
-}
-
 /// Registry stores and manages all the data of the ECS
-pub fn Registry(comptime archetypes: anytype) type {
+pub fn Registry(comptime templates: anytype) type {
     return struct {
         allocator: std.mem.Allocator,
 
-        archetypes: ArchetypeStorage(archetypes),
+        templates: TemplateStorage(),
+        enabled_components: []
         entity_positions: std.AutoHashMap(EntityID, EntityPosition),
         next_id: EntityID = 0,
-        // archetypes_entities: [@typeInfo(@TypeOf(archetypes)).@"struct".fields.len]EntityIdx,
 
         const Self = @This();
+
+        fn TemplateStorage() type {
+            const template_fs = @typeInfo(@TypeOf(templates)).@"struct".fields;
+            comptime var types: [template_fs.len]type = undefined;
+
+            inline for (template_fs, 0..) |template_f, template_i| {
+                const Template = @field(templates, template_f.name);
+
+                types[template_i] = std.MultiArrayList(Template);
+            }
+
+            return @Tuple(&types);
+        }
+
+        fn initTemplateStorage() TemplateStorage() {
+            var storage: TemplateStorage() = undefined;
+
+            const template_storage_fs = @typeInfo(TemplateStorage()).@"struct".fields;
+            inline for (template_storage_fs) |template_storage_f| {
+                @field(storage, template_storage_f.name) = .{};
+            }
+
+            return storage;
+        }
 
         pub fn init(allocator: std.mem.Allocator) Self {
             return .{
                 .allocator = allocator,
-                .archetypes = initArchetypeStorage(archetypes),
+                .templates = initTemplateStorage(),
                 .entity_positions = std.AutoHashMap(EntityID, EntityPosition).init(allocator),
-                // .archetypes_entities = std.mem.zeroes([@typeInfo(@TypeOf(archetypes)).@"struct".fields.len]std.ArrayList(usize)),
             };
         }
 
         pub fn deinit(self: *Self) void {
-            const fields = @typeInfo(ArchetypeStorage(archetypes)).@"struct".fields;
-            inline for (fields) |field| {
-                @field(self.archetypes, field.name).deinit(self.allocator);
+            const template_storage_fs = @typeInfo(TemplateStorage()).@"struct".fields;
+            inline for (template_storage_fs) |template_storage_f| {
+                @field(self.templates, template_storage_f.name).deinit(self.allocator);
             }
 
             self.entity_positions.deinit();
-
-            // for (self.archetypes_entities) |archetype_entities| {
-            //     archetype_entities.deinit(self.allocator);
-            // }
         }
 
         /// Registers a new entity: matches entity to the correct archetype and adds the data
         /// entity_data - struct instance containing data for an entity matching an archetype
         pub fn spawn(self: *Self, entity_data: anytype) !EntityID {
-            const Entity_Type = @TypeOf(entity_data);
-            RequireStruct(Entity_Type, "entity_data");
+            const Template = @TypeOf(entity_data);
+            RequireStruct(Template, "entity_data");
 
-            const fields = @typeInfo(@TypeOf(archetypes)).@"struct".fields;
-            comptime var archetype_idx: ?ArchetypeIdx = null;
-            inline for (fields, 0..) |field, i| {
-                if (@field(archetypes, field.name) == Entity_Type) {
-                    archetype_idx = i;
+            const template_fs = @typeInfo(@TypeOf(templates)).@"struct".fields;
+            comptime var template_i: ?TemplateIdx = null;
+            inline for (template_fs, 0..) |template_f, i| {
+                if (@field(templates, template_f.name) == Template) {
+                    template_i = i;
                     break;
                 }
             }
 
             const id = self.next_id;
 
-            const arch_idx = archetype_idx orelse @compileError(@typeName(Entity_Type) ++ " does not match the type of any archetypes");
+            const template_idx = template_i orelse @compileError(@typeName(Template) ++ " does not match the type of any templates");
 
-            const archetype_data = &@field(self.archetypes, std.fmt.comptimePrint("{}", .{arch_idx}));
-            try archetype_data.append(self.allocator, Component(Entity_Type){ .data = entity_data, .enabled = true });
-            const entity_pos_idx = archetype_data.len - 1;
+            const template_data = &@field(self.templates, std.fmt.comptimePrint("{}", .{template_idx}));
+            try template_data.append(self.allocator, entity_data);
+            const entity_pos_idx = template_data.len - 1;
 
             try self.entity_positions.put(id, .{
-                .archetype_idx = arch_idx,
+                .template_idx = template_idx,
                 .entity_idx = entity_pos_idx,
             });
 
@@ -145,95 +107,56 @@ pub fn Registry(comptime archetypes: anytype) type {
         /// RETURNS - std.ArrayList of pointers to components
         ///
         /// EX: query(.{Position, Velocity}, .{Attack}, .{Health})
-        pub fn query(self: Self, comptime has: anytype, comptime not: anytype, comptime maybe: anytype) !std.ArrayList(*Component(type)) {
+        pub fn query(self: Self, comptime has: anytype, comptime not: anytype, comptime maybe: anytype) !std.ArrayList(std.MultiArrayList(type).Slice) {
             RequireStruct(@TypeOf(has), "has");
             RequireStruct(@TypeOf(not), "not");
             RequireStruct(@TypeOf(maybe), "maybe");
 
-            // comptime var component_positions = std.ArrayList(ComponentsPosition);
-            comptime var components = std.ArrayList(*Component(type)).empty;
+            comptime var template_data_slices = std.ArrayList(std.MultiArrayList.Slice).empty;
 
-            const has_fields = @typeInfo(@TypeOf(has)).@"struct".fields; // {Position, Velocity}
-            const not_fields = @typeInfo(@TypeOf(not)).@"struct".fields; // {Attack}
-            const maybe_fields = @typeInfo(@TypeOf(maybe)).@"struct".fields; // {Health}
+            const has_fs = @typeInfo(@TypeOf(has)).@"struct".fields; // {Position, Velocity}
+            const not_fs = @typeInfo(@TypeOf(not)).@"struct".fields; // {Attack}
+            const maybe_fs = @typeInfo(@TypeOf(maybe)).@"struct".fields; // {Health}
 
-            const archetypes_fields = @typeInfo(@TypeOf(archetypes)).@"struct".fields; // {Player, Tree, UI_Element, ...}
-            archetype_for: inline for (archetypes_fields, 0..) |archetypes_field, archetype_idx| {
-                const Archetype = @field(archetypes, archetypes_field.name); // Player
-                const archetype_fields = @typeInfo(Archetype).@"struct".fields; // {Health, Position, Velocity, Attack, ...}
+            const templates_fs = @typeInfo(@TypeOf(templates)).@"struct".fields; // {Player, Tree, UI_Element, ...}
+            archetype_for: inline for (templates_fs, 0..) |templates_f, templates_i| {
+                const Template = @field(templates, templates_f.name); // Player
+                const template_fs = @typeInfo(Template).@"struct".fields; // {Health, Position, Velocity, Attack, ...}
 
-                inline for (archetype_fields) |arch_field| {
-                    inline for (not_fields) |not_field| {
-                        const Required = @field(not, not_field.name);
+                inline for (template_fs) |template_f| {
+                    inline for (not_fs) |not_f| {
+                        const Required = @field(not, not_f.name);
 
-                        if (arch_field.type == Required) {
+                        if (template_f.type == Required) {
                             continue :archetype_for;
                         }
                     }
 
-                    const archetype_data = @field(self.archetypes, std.fmt.comptimePrint("{}", .{archetype_idx}));
-
-                    inline for (has_fields) |has_field| {
-                        const Required = @field(has, has_field.name);
+                    inline for (has_fs) |has_f| {
+                        const Required = @field(has, has_f.name);
                         comptime var found = false;
-                        if (arch_field.type == Required) {
-                            // try component_positions.append(self.allocator, ComponentsPosition{
-                            //     .component_name = arch_field.name,
-                            //     .component_type = arch_field.type,
-                            //     .archetype_idx = archetype_idx,
-                            // });
-                            for (0..archetype_data.len) |i| {
-                                const component = &@field(archetype_data.get(i), arch_field.name);
-                                try components.append(self.allocator, component);
-                            }
-
+                        if (template_f.type == Required) {
                             found = true;
                             break;
                         }
                         if (!found) continue :archetype_for;
                     }
 
-                    inline for (maybe_fields) |maybe_field| {
-                        const Required = @field(maybe, maybe_field.name);
+                    inline for (maybe_fs) |maybe_f| {
+                        const Required = @field(maybe, maybe_f.name);
 
-                        if (arch_field.type == Required) {
-                            // try component_positions.append(self.allocator, ComponentsPosition{
-                            //     .component_name = arch_field.name,
-                            //     .component_type = arch_field.type,
-                            //     .archetype_idx = archetype_idx,
-                            // });
-                            for (0..archetype_data.len) |idx| {
-                                const component = &@field(archetype_data.get(idx), arch_field.name);
-                                try components.append(self.allocator, component);
-                            }
-
+                        if (template_f.type == Required) {
                             break;
                         }
                     }
+
+                    const template_data = &@field(self.archetypes, std.fmt.comptimePrint("{}", .{templates_i}));
+                    @compileLog(template_data.slice());
+                    template_data_slices.append(self.allocator, template_data.slice());
                 }
             }
 
-            return components;
+            return;
         }
-
-        // /// Finds and returns the component in archetype component_pos.archetype_idx, then the entity in the archetype at entity_idx, and finally grabs the component by name
-        // /// components_pos - position of a components arraylist
-        // /// entity_idx - position of a specific entity in an archetype
-        // /// RETURNS - pointer to the found component
-        // ///
-        // /// Emits a compile error if no component found
-        // pub fn getComponent(self: Self, comptime components_pos: ComponentsPosition, comptime entity_idx: EntityIdx) *Component(components_pos.component_type) {
-        //     if (components_pos.archetype_idx >= @typeInfo(@TypeOf(self.archetypes)).@"struct".fields.len)
-        //         @compileError("components_pos.archetype_idx(" ++ components_pos.archetype_idx ++ ") is greater than the length of the archetypes tuple");
-        //
-        //     const archetype = @field(self.archetypes, std.fmt.comptimePrint("{}", components_pos.archetype_idx));
-        //     const entity = comptime archetype.get(entity_idx);
-        //
-        //     if (!@hasField(@TypeOf(entity), components_pos.component_name))
-        //         @compileError("no field in entity named components_pos.component_name(" ++ components_pos.component_name ++ ")");
-        //     const component = &@field(entity, components_pos.component_name);
-        //
-        //     return component;
-        // }
     };
 }
