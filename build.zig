@@ -11,14 +11,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const tests = b.addTest(.{
-        .name = "tests",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/tests.zig"),
-            .target = target,
-            .optimize = optimize,
-        })
-    });
+    const tests = b.addTest(.{ .name = "tests", .root_module = b.createModule(.{
+        .root_source_file = b.path("src/tests.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
 
     // Test executable
     const exe = b.addExecutable(.{
@@ -28,7 +25,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             // .link_libc = true,
-        })
+        }),
     });
 
     tests.root_module.addImport("Compt", compt_module);

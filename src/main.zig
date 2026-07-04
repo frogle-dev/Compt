@@ -38,5 +38,16 @@ const UI_Element = struct {
 };
 
 pub fn main() !void {
+    var debug_allocator = std.heap.DebugAllocator(.{}){};
+    defer std.debug.assert(debug_allocator.deinit() == .ok);
+
+    // const gpa = debug_allocator.allocator();
+    // const gpa = switch (@import("builtin").mode) {
+    //     .Debug, .ReleaseSafe => {
+    //         debug_allocator.allocator();
+    //     },
+    //     .ReleaseFast, .ReleaseSmall => std.heap.c_allocator,
+    // };
+
     std.debug.print("-.-", .{});
 }

@@ -41,7 +41,8 @@ test "spawn" {
     var debug_allocator = std.heap.DebugAllocator(.{}){};
     defer std.debug.assert(debug_allocator.deinit() == .ok);
     const gpa = debug_allocator.allocator();
-    var registry = compt.Registry(.{ Player, Tree, UI_Element }).init(gpa);
+
+    var registry = try compt.Registry(.{ Player, Tree, UI_Element }).init(gpa);
     defer registry.deinit();
 
     const player: Player = .{
@@ -90,16 +91,9 @@ test "spawn" {
 test "query" {
     var debug_allocator = std.heap.DebugAllocator(.{}){};
     defer std.debug.assert(debug_allocator.deinit() == .ok);
-
     const gpa = debug_allocator.allocator();
-    // const gpa = switch (@import("builtin").mode) {
-    //     .Debug, .ReleaseSafe => {
-    //         debug_allocator.allocator();
-    //     },
-    //     .ReleaseFast, .ReleaseSmall => std.heap.c_allocator,
-    // };
 
-    var registry = compt.Registry(.{ Player, Tree, UI_Element }).init(gpa);
+    var registry = try compt.Registry(.{ Player, Tree, UI_Element }).init(gpa);
     defer registry.deinit();
 
     const player: Player = .{

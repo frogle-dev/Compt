@@ -16,33 +16,37 @@ fn RequireStruct(comptime T: type, comptime name: []const u8) void {
 
 /// Registry stores and manages all the data of the ECS
 pub fn Registry(comptime templates: anytype) type {
+    const templates_fs = @typeInfo(@TypeOf(templates)).@"struct".fields;
+
     return struct {
         allocator: std.mem.Allocator,
 
-        templates: TemplateStorage(),
-        enabled_components: []
+        templates: TemplatesStorage(),
+        enabled_components: [templates_fs.len]std.DynamicBitSet,
         entity_positions: std.AutoHashMap(EntityID, EntityPosition),
         next_id: EntityID = 0,
 
         const Self = @This();
 
-        fn TemplateStorage() type {
-            const template_fs = @typeInfo(@TypeOf(templates)).@"struct".fields;
-            comptime var types: [template_fs.len]type = undefined;
+        fn TemplatesStorage() type {
+            RequireStruct(@TypeOf(templates), "templates");
 
-            inline for (template_fs, 0..) |template_f, template_i| {
-                const Template = @field(templates, template_f.name);
+            comptime var types: [templates_fs.len]type = undefined;
 
-                types[template_i] = std.MultiArrayList(Template);
+            inline for (templates_fs, 0..) |templates_f, templates_i| {
+                const Template = @field(templates, templates_f.name);
+                RequireStruct(Template, "templates field");
+
+                types[templates_i] = std.MultiArrayList(Template);
             }
 
             return @Tuple(&types);
         }
 
-        fn initTemplateStorage() TemplateStorage() {
-            var storage: TemplateStorage() = undefined;
+        fn initTemplatesStorage() TemplatesStorage() {
+            var storage: TemplatesStorage() = undefined;
 
-            const template_storage_fs = @typeInfo(TemplateStorage()).@"struct".fields;
+            const template_storage_fs = @typeInfo(TemplatesStorage()).@"struct".fields;
             inline for (template_storage_fs) |template_storage_f| {
                 @field(storage, template_storage_f.name) = .{};
             }
@@ -50,18 +54,28 @@ pub fn Registry(comptime templates: anytype) type {
             return storage;
         }
 
-        pub fn init(allocator: std.mem.Allocator) Self {
+        pub fn init(allocator: std.mem.Allocator) !Self {
+            var enabled_components: [templates_fs.len]std.DynamicBitSet = undefined;
+            for (0..enabled_components.len) |i| {
+                enabled_components[i] = try std.DynamicBitSet.initFull(allocator, 0);
+            }
+
             return .{
                 .allocator = allocator,
-                .templates = initTemplateStorage(),
+                .templates = initTemplatesStorage(),
+                .enabled_components = enabled_components,
                 .entity_positions = std.AutoHashMap(EntityID, EntityPosition).init(allocator),
             };
         }
 
         pub fn deinit(self: *Self) void {
-            const template_storage_fs = @typeInfo(TemplateStorage()).@"struct".fields;
+            const template_storage_fs = @typeInfo(TemplatesStorage()).@"struct".fields;
             inline for (template_storage_fs) |template_storage_f| {
                 @field(self.templates, template_storage_f.name).deinit(self.allocator);
+            }
+
+            for (&self.enabled_components) |*dynamic_bit_set| {
+                dynamic_bit_set.deinit();
             }
 
             self.entity_positions.deinit();
@@ -73,18 +87,22 @@ pub fn Registry(comptime templates: anytype) type {
             const Template = @TypeOf(entity_data);
             RequireStruct(Template, "entity_data");
 
-            const template_fs = @typeInfo(@TypeOf(templates)).@"struct".fields;
-            comptime var template_i: ?TemplateIdx = null;
-            inline for (template_fs, 0..) |template_f, i| {
-                if (@field(templates, template_f.name) == Template) {
-                    template_i = i;
+            comptime var template_fs_len: usize = undefined;
+            comptime var templates_i: ?TemplateIdx = null;
+            inline for (templates_fs, 0..) |templates_f, i| {
+                if (@field(templates, templates_f.name) == Template) {
+                    templates_i = i;
+
+                    template_fs_len = @typeInfo(Template).@"struct".fields.len;
                     break;
                 }
             }
 
             const id = self.next_id;
 
-            const template_idx = template_i orelse @compileError(@typeName(Template) ++ " does not match the type of any templates");
+            const template_idx = templates_i orelse @compileError(@typeName(Template) ++ " does not match the type of any templates");
+
+            try self.enabled_components[template_idx].resize(self.enabled_components[template_idx].count() + template_fs_len, true);
 
             const template_data = &@field(self.templates, std.fmt.comptimePrint("{}", .{template_idx}));
             try template_data.append(self.allocator, entity_data);
@@ -107,7 +125,7 @@ pub fn Registry(comptime templates: anytype) type {
         /// RETURNS - std.ArrayList of pointers to components
         ///
         /// EX: query(.{Position, Velocity}, .{Attack}, .{Health})
-        pub fn query(self: Self, comptime has: anytype, comptime not: anytype, comptime maybe: anytype) !std.ArrayList(std.MultiArrayList(type).Slice) {
+        pub fn query(self: Self, comptime has: anytype, comptime not: anytype, comptime maybe: anytype) ![]std.MultiArrayList(type).Slice {
             RequireStruct(@TypeOf(has), "has");
             RequireStruct(@TypeOf(not), "not");
             RequireStruct(@TypeOf(maybe), "maybe");
@@ -118,7 +136,6 @@ pub fn Registry(comptime templates: anytype) type {
             const not_fs = @typeInfo(@TypeOf(not)).@"struct".fields; // {Attack}
             const maybe_fs = @typeInfo(@TypeOf(maybe)).@"struct".fields; // {Health}
 
-            const templates_fs = @typeInfo(@TypeOf(templates)).@"struct".fields; // {Player, Tree, UI_Element, ...}
             archetype_for: inline for (templates_fs, 0..) |templates_f, templates_i| {
                 const Template = @field(templates, templates_f.name); // Player
                 const template_fs = @typeInfo(Template).@"struct".fields; // {Health, Position, Velocity, Attack, ...}
@@ -158,5 +175,12 @@ pub fn Registry(comptime templates: anytype) type {
 
             return;
         }
+
+        // TODO:
+        pub fn enableComponent() !void {}
+
+        pub fn disableComponent() !void {}
+
+        pub fn isComponentEnabled() !bool {}
     };
 }
