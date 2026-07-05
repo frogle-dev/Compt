@@ -13,6 +13,18 @@ fn getStructFields(comptime T: type) []const std.builtin.Type.StructField {
     return @typeInfo(T).@"struct".fields;
 }
 
+/// to remove file name prepended to type name. ie: tests.Position. Used so accessing component slices from query is more elegant
+fn shortTypeName(comptime T: type) [:0]const u8 {
+    const full = @typeName(T);
+
+    comptime var i = full.len;
+    while (i > 0) : (i -= 1) {
+        if (full[i - 1] == '.') return full[i..];
+    }
+
+    return full;
+}
+
 /// Registry stores and manages all the data of the ECS
 pub fn Registry(comptime templates: anytype) type {
     const templates_fs = comptime getStructFields(@TypeOf(templates));
@@ -125,7 +137,7 @@ pub fn Registry(comptime templates: anytype) type {
 
             inline for (has_fs, 0..) |has_f, i| {
                 const Component = @field(has, has_f.name);
-                names[i] = @typeName(Component);
+                names[i] = comptime shortTypeName(Component);
                 types[i] = *Component;
                 attrs[i] = std.builtin.Type.StructField.Attributes{
                     .@"align" = @alignOf(*Component),
@@ -136,7 +148,7 @@ pub fn Registry(comptime templates: anytype) type {
 
             inline for (maybe_fs, 0..) |maybe_f, i| {
                 const Component = @field(maybe, maybe_f.name);
-                names[has_fs.len + i] = @typeName(Component);
+                names[has_fs.len + i] = comptime shortTypeName(Component);
                 types[has_fs.len + i] = ?*Component;
                 attrs[has_fs.len + i] = std.builtin.Type.StructField.Attributes{
                     .@"align" = @alignOf(*Component),
@@ -160,9 +172,9 @@ pub fn Registry(comptime templates: anytype) type {
 
             const has_fs = comptime getStructFields(@TypeOf(has)); // {Position, Velocity}
             const not_fs = comptime getStructFields(@TypeOf(not)); // {Attack}
-            const maybe_fs = comptime getStructFields(@TypeOf(maybe)); // {Health}
+            // const maybe_fs = comptime getStructFields(@TypeOf(maybe)); // {Health}
 
-            templates_for: inline for (templates_fs) |templates_f| {
+            templates_for: inline for (templates_fs, 0..) |templates_f, templates_i| {
                 const Template = @field(templates, templates_f.name); // Player
                 const template_fs = comptime getStructFields(Template); // {Health, Position, Velocity, Attack, ...}
 
@@ -179,74 +191,49 @@ pub fn Registry(comptime templates: anytype) type {
                     // skip templates not containing all components in HAS
                     comptime var matched = false;
                     inline for (has_fs) |has_f| {
-                        const Required = @field(has, has_f.name);
-                        if (template_f.type == Required) {
+                        const Has = @field(has, has_f.name);
+                        if (template_f.type == Has) {
                             matched = true;
                             break;
                         }
                     }
                     if (!matched) continue :templates_for;
+
+                    // inline for (maybe_fs) |maybe_f| {
+                    //     const Maybe = @field(maybe, maybe_f.name);
+                    //     if (template_f.type == Maybe) {
+
+                    //     }
+                    // }
+
+                    // WRITE CODE TO CHECK FOR THE MAYBE FIELDS THAT EXIST AND THEN IN GET DATA SECTION PUT THE DATA FOR THE MAYBE FIELDS THAT EXIST AND PUT NULL FOR THE ONES THAT DONT
                 }
-            }
 
-            // get found data
+                // get found data
+                inline for (comptime getStructFields(QueryResult(has, maybe))) |query_result_f| {
+                    const Component =
+                        if (@typeInfo(query_result_f.type) == .optional) std.meta.Child(std.meta.Child(query_result_f.type)) else std.meta.Child(query_result_f.type);
+                    @compileLog(Component);
 
-            templates_for: inline for (templates_fs, 0..) |templates_f, templates_i| {
-                const Template = @field(templates, templates_f.name); // Player
-                const template_fs = comptime getStructFields(Template); // {Health, Position, Velocity, Attack, ...}
-
-                inline for (template_fs) |template_f| {
-                    inline for (not_fs) |not_f| {
-                        const Required = @field(not, not_f.name);
-
-                        if (template_f.type == Required) {
-                            continue :template_for;
+                    comptime var component_name: ?[]const u8 = null;
+                    inline for (template_fs) |template_f| {
+                        @compileLog(template_f.type);
+                        if (template_f.type == Component) {
+                            component_name = template_f.name;
                         }
                     }
 
-                    inline for (has_fs) |has_f| {
-                        const Required = @field(has, has_f.name);
-                        comptime var found = false;
-                        if (template_f.type == Required) {
-                            inline for (comptime getStructFields(QueryResult(has, maybe))) |query_result_f| {
-                                const Component = std.meta.Child(query_result_f.type);
+                    if (component_name) |name| {
+                        @compileLog(name);
+                        const FieldEnum = comptime std.meta.FieldEnum(Template);
+                        @compileLog(@typeInfo(FieldEnum).@"enum".fields);
+                        const field_tag = comptime std.meta.stringToEnum(FieldEnum, name).?;
+                        @compileLog(@typeInfo(@TypeOf(field_tag)));
+                        for (@field(self.templates, std.fmt.comptimePrint("{}", .{templates_i})).items(field_tag)) |*field| {
+                            var query_result: QueryResult(has, maybe) = undefined;
+                            @field(query_result, shortTypeName(Component)) = field;
 
-                                const FieldEnum = comptime std.meta.FieldEnum(Component);
-                                const field_tag = comptime std.meta.stringToEnum(FieldEnum, query_result_f.name).?;
-                                for (&@field(self.templates, std.fmt.comptimePrint("{}", .{templates_i})).slice().items(field_tag)) |field| {
-                                    comptime var query_result: QueryResult(has, maybe) = undefined;
-                                    @field(query_result, @typeName(field.type)) = &field;
-
-                                    try query_result_soa.append(self.allocator, query_result);
-                                }
-                                // const template_data = &@field(self.templates, std.fmt.comptimePrint("{}", .{templates_i}));
-                                // for (0..template_data.len) |template_data_i| {
-                                //     const entity_data = template_data.get(template_data_i);
-
-                                //     @field(query_result, @typeName(field.type))
-                                // }
-                            }
-
-                            found = true;
-                            break;
-                        }
-                        if (!found) continue :template_for;
-                    }
-
-                    inline for (maybe_fs) |maybe_f| {
-                        const Required = @field(maybe, maybe_f.name);
-
-                        if (template_f.type == Required) {
-                            inline for (comptime getStructFields(QueryResult(has, maybe))) |query_result_f| {
-                                for (&@field(self.templates, std.fmt.comptimePrint("{}", .{templates_i})).slice().items(query_result_f.type)) |field| {
-                                    comptime var query_result: QueryResult(has, maybe) = undefined;
-                                    @field(query_result, @typeName(field.type)) = &field;
-
-                                    try query_result_soa.append(self.allocator, query_result);
-                                }
-                            }
-
-                            break;
+                            try query_result_soa.append(self.allocator, query_result);
                         }
                     }
                 }
