@@ -13,7 +13,7 @@ fn getStructFields(comptime T: type) []const std.builtin.Type.StructField {
     return @typeInfo(T).@"struct".fields;
 }
 
-/// to remove file name prepended to type name. ie: tests.Position. Used so accessing component slices from query is more elegant
+/// Removes file name prepended to type name. ie: tests.Position. Used so accessing component slices from query is more elegant
 fn shortTypeName(comptime T: type) [:0]const u8 {
     const full = @typeName(T);
 
@@ -160,11 +160,25 @@ pub fn Registry(comptime templates: anytype) type {
             return @Struct(.auto, null, &names, &types, &attrs);
         }
 
+        pub fn Query(comptime has: anytype, comptime maybe: anytype) type {
+            return struct {
+                data_view: std.MultiArrayList(QueryResult(has, maybe)) = std.MultiArrayList(QueryResult(has, maybe)).empty,
+
+                pub fn deinit(self: *@This(), gpa: std.mem.Allocator) void {
+                    self.data_view.deinit(gpa);
+                }
+
+                pub fn getComponents(self: @This(), comptime T: type) []T {
+                    self.data_view.items(std.fmt.comptimePrint(".{}", .{shortTypeName(T)}));
+                }
+            };
+        }
+
         /// Queries for component types within the templates
         /// has - tuple of types, what components an template must have
         /// not - tuple of types, what components an template must not have
         /// maybe - tuple of types, what components an template could have, captures components if an template has them
-        /// RETURNS - std.MultiArrayList containing
+        /// RETURNS - std.MultiArrayList containing a QueryResult which stores pointers to the components listed in has and maybe
         ///
         /// EX: query(.{Position, Velocity}, .{Attack}, .{Health})
         pub fn query(self: Self, comptime has: anytype, comptime not: anytype, comptime maybe: anytype) !std.MultiArrayList(QueryResult(has, maybe)) {
@@ -172,7 +186,6 @@ pub fn Registry(comptime templates: anytype) type {
 
             const has_fs = comptime getStructFields(@TypeOf(has)); // {Position, Velocity}
             const not_fs = comptime getStructFields(@TypeOf(not)); // {Attack}
-            // const maybe_fs = comptime getStructFields(@TypeOf(maybe)); // {Health}
 
             templates_for: inline for (templates_fs, 0..) |templates_f, templates_i| {
                 const Template = @field(templates, templates_f.name); // Player

@@ -127,17 +127,22 @@ test "query" {
 
     var q2 = try registry.query(.{Position}, .{}, .{Health});
     defer q2.deinit(gpa);
+    // std.debug.print("{any}\n", .{q2.items(.Position)});
+    // std.debug.print("{any}\n", .{q2.items(.Health)});
     try std.testing.expectEqual(4, q2.len);
     try std.testing.expectEqual(4, q2.items(.Position).len);
     try std.testing.expectEqual(4, q2.items(.Health).len);
 
     var q3 = try registry.query(.{Position}, .{}, .{});
     defer q3.deinit(gpa);
+    // std.debug.print("{any}\n", .{q3.items(.Position)});
     try std.testing.expectEqual(4, q3.len);
     try std.testing.expectEqual(4, q3.items(.Position).len);
 
     var q4 = try registry.query(.{Position}, .{Attack}, .{Health});
     defer q4.deinit(gpa);
+    // std.debug.print("{any}\n", .{q4.items(.Position)});
+    // std.debug.print("{any}\n", .{q4.items(.Health)});
     try std.testing.expectEqual(3, q4.len);
     try std.testing.expectEqual(3, q4.items(.Position).len);
     try std.testing.expectEqual(3, q4.items(.Health).len);
