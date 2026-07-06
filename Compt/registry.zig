@@ -109,7 +109,7 @@ pub fn Registry(comptime templates: anytype) type {
 
             const template_idx = templates_i orelse @compileError(@typeName(Template) ++ " does not match the type of any templates");
 
-            try self.enabled_components[template_idx].resize(self.enabled_components[template_idx].count() + template_fs_len, true);
+            try self.enabled_components[template_idx].resize(self.enabled_components[template_idx].capacity() + template_fs_len, true);
 
             // const template_data = &@field(self.templates, std.fmt.comptimePrint("{}", .{template_idx}));
             var template_data = &@field(self.templates, std.fmt.comptimePrint("{}", .{template_idx}));
@@ -160,6 +160,8 @@ pub fn Registry(comptime templates: anytype) type {
             return @Struct(.auto, null, &names, &types, &attrs);
         }
 
+        /// returned from query function
+        /// data_view - contains pointers to the data found in the query
         pub fn Query(comptime has: anytype, comptime maybe: anytype) type {
             const Result = QueryResult(has, maybe);
 
@@ -170,16 +172,20 @@ pub fn Registry(comptime templates: anytype) type {
                     self.data_view.deinit(gpa);
                 }
 
+                /// number of entities sourced from by the query
                 pub fn queryResultCount(self: @This()) usize {
                     return self.data_view.len;
                 }
 
+                /// get all the components of a specific type that were in the HAS filter
                 pub fn getHasComponents(self: @This(), comptime Component: type) []*Component {
                     const FieldEnum = std.meta.FieldEnum(Result);
                     const field_tag = comptime std.meta.stringToEnum(FieldEnum, shortTypeName(Component)).?;
                     return self.data_view.items(field_tag);
                 }
 
+                /// get all the components of a specific type that were in the MAYBE filter
+                /// optional because some entities did not contain the maybe components
                 pub fn getMaybeComponents(self: @This(), comptime Component: type) []?*Component {
                     const FieldEnum = std.meta.FieldEnum(Result);
                     const field_tag = comptime std.meta.stringToEnum(FieldEnum, shortTypeName(Component)).?;
@@ -192,10 +198,10 @@ pub fn Registry(comptime templates: anytype) type {
         /// has - tuple of types, what components an template must have
         /// not - tuple of types, what components an template must not have
         /// maybe - tuple of types, what components an template could have, captures components if an template has them
-        /// RETURNS - std.MultiArrayList containing a QueryResult which stores pointers to the components listed in has and maybe
+        /// RETURNS - Query struct
         ///
         /// EX: query(.{Position, Velocity}, .{Attack}, .{Health})
-        pub fn query(self: Self, comptime has: anytype, comptime not: anytype, comptime maybe: anytype) !Query(has, maybe) {
+        pub fn query(self: *Self, comptime has: anytype, comptime not: anytype, comptime maybe: anytype) !Query(has, maybe) {
             var query_result_soa = std.MultiArrayList(QueryResult(has, maybe)).empty;
 
             const has_fs = comptime getStructFields(@TypeOf(has)); // {Position, Velocity}
@@ -205,7 +211,7 @@ pub fn Registry(comptime templates: anytype) type {
                 const Template = @field(templates, templates_f.name); // Player
                 const template_fs = comptime getStructFields(Template); // {Health, Position, Velocity, Attack, ...}
 
-                comptime var matched = false;
+                comptime var matched: usize = 0;
                 inline for (template_fs) |template_f| {
                     // skip templates containing components in NOT
                     inline for (not_fs) |not_f| {
@@ -219,13 +225,14 @@ pub fn Registry(comptime templates: anytype) type {
                     // skip templates not containing all components in HAS
                     inline for (has_fs) |has_f| {
                         const Has = @field(has, has_f.name);
+
                         if (template_f.type == Has) {
-                            matched = true;
+                            matched += 1;
                             break;
                         }
                     }
                 }
-                if (!matched) {
+                if (matched != has_fs.len) {
                     continue :templates_for;
                 }
 
