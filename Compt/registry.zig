@@ -178,6 +178,7 @@ pub fn Registry(comptime templates: anytype) type {
                 const Template = @field(templates, templates_f.name); // Player
                 const template_fs = comptime getStructFields(Template); // {Health, Position, Velocity, Attack, ...}
 
+                comptime var matched = false;
                 inline for (template_fs) |template_f| {
                     // skip templates containing components in NOT
                     inline for (not_fs) |not_f| {
@@ -189,7 +190,6 @@ pub fn Registry(comptime templates: anytype) type {
                     }
 
                     // skip templates not containing all components in HAS
-                    comptime var matched = false;
                     inline for (has_fs) |has_f| {
                         const Has = @field(has, has_f.name);
                         if (template_f.type == Has) {
@@ -197,45 +197,38 @@ pub fn Registry(comptime templates: anytype) type {
                             break;
                         }
                     }
-                    if (!matched) continue :templates_for;
-
-                    // inline for (maybe_fs) |maybe_f| {
-                    //     const Maybe = @field(maybe, maybe_f.name);
-                    //     if (template_f.type == Maybe) {
-
-                    //     }
-                    // }
-
-                    // WRITE CODE TO CHECK FOR THE MAYBE FIELDS THAT EXIST AND THEN IN GET DATA SECTION PUT THE DATA FOR THE MAYBE FIELDS THAT EXIST AND PUT NULL FOR THE ONES THAT DONT
+                }
+                if (!matched) {
+                    continue :templates_for;
                 }
 
                 // get found data
-                inline for (comptime getStructFields(QueryResult(has, maybe))) |query_result_f| {
-                    const Component =
-                        if (@typeInfo(query_result_f.type) == .optional) std.meta.Child(std.meta.Child(query_result_f.type)) else std.meta.Child(query_result_f.type);
-                    @compileLog(Component);
+                const template_data = @field(self.templates, std.fmt.comptimePrint("{}", .{templates_i}));
+                for (0..template_data.len) |entity_i| {
+                    var query_result: QueryResult(has, maybe) = undefined;
 
-                    comptime var component_name: ?[]const u8 = null;
-                    inline for (template_fs) |template_f| {
-                        @compileLog(template_f.type);
-                        if (template_f.type == Component) {
-                            component_name = template_f.name;
+                    inline for (comptime getStructFields(QueryResult(has, maybe))) |query_result_f| {
+                        const Component =
+                            if (@typeInfo(query_result_f.type) == .optional) std.meta.Child(std.meta.Child(query_result_f.type)) else std.meta.Child(query_result_f.type);
+
+                        comptime var component_name: ?[]const u8 = null;
+                        inline for (template_fs) |template_f| {
+                            if (template_f.type == Component) {
+                                component_name = template_f.name;
+                            }
+                        }
+
+                        if (component_name) |name| { // HAS field
+                            const FieldEnum = comptime std.meta.FieldEnum(Template);
+                            const field_tag = comptime std.meta.stringToEnum(FieldEnum, name).?;
+                            const slice = template_data.items(field_tag);
+                            @field(query_result, shortTypeName(Component)) = &slice[entity_i];
+                        } else { // MAYBE field
+                            @field(query_result, shortTypeName(Component)) = null;
                         }
                     }
 
-                    if (component_name) |name| {
-                        @compileLog(name);
-                        const FieldEnum = comptime std.meta.FieldEnum(Template);
-                        @compileLog(@typeInfo(FieldEnum).@"enum".fields);
-                        const field_tag = comptime std.meta.stringToEnum(FieldEnum, name).?;
-                        @compileLog(@typeInfo(@TypeOf(field_tag)));
-                        for (@field(self.templates, std.fmt.comptimePrint("{}", .{templates_i})).items(field_tag)) |*field| {
-                            var query_result: QueryResult(has, maybe) = undefined;
-                            @field(query_result, shortTypeName(Component)) = field;
-
-                            try query_result_soa.append(self.allocator, query_result);
-                        }
-                    }
+                    try query_result_soa.append(self.allocator, query_result);
                 }
             }
 

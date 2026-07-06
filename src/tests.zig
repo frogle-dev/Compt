@@ -119,37 +119,28 @@ test "query" {
 
     var q1 = try registry.query(.{Position}, .{}, .{Velocity});
     defer q1.deinit(gpa);
-    @compileLog(q1);
-    try std.testing.expectEqual(2, q1.len);
-    try std.testing.expectEqual(2, q1.items(.Position).len);
-    try std.testing.expectEqual(1, q1.items(.Velocity).len);
+    // std.debug.print("{any}\n", .{q1.items(.Position)});
+    // std.debug.print("{any}\n", .{q1.items(.Velocity)});
+    try std.testing.expectEqual(4, q1.len);
+    try std.testing.expectEqual(4, q1.items(.Position).len);
+    try std.testing.expectEqual(4, q1.items(.Velocity).len);
 
     var q2 = try registry.query(.{Position}, .{}, .{Health});
     defer q2.deinit(gpa);
-    try std.testing.expectEqual(1 + 2 + 1, q2.len);
+    try std.testing.expectEqual(4, q2.len);
     try std.testing.expectEqual(4, q2.items(.Position).len);
-    try std.testing.expectEqual(3, q2.items(.Health).len);
+    try std.testing.expectEqual(4, q2.items(.Health).len);
 
-    var q3 = try registry.query(
-        .{Position},
-        .{},
-        .{},
-    );
+    var q3 = try registry.query(.{Position}, .{}, .{});
     defer q3.deinit(gpa);
-    try std.testing.expectEqual(1 + 2 + 1, q3.len);
-    try std.testing.expectEqual(Position, q3.items[0]);
-    try std.testing.expectEqual(Position, q3.items[1]);
-    try std.testing.expectEqual(Position, q3.items[2]);
-    try std.testing.expectEqual(Position, q3.items[3]);
+    try std.testing.expectEqual(4, q3.len);
+    try std.testing.expectEqual(4, q3.items(.Position).len);
 
     var q4 = try registry.query(.{Position}, .{Attack}, .{Health});
     defer q4.deinit(gpa);
-    try std.testing.expect(4 + 1, q4.len);
-    try std.testing.expectEqual(Position, q4.items[0]);
-    try std.testing.expectEqual(Health, q4.items[1]);
-    try std.testing.expectEqual(Position, q4.items[2]);
-    try std.testing.expectEqual(Health, q4.items[3]);
-    try std.testing.expectEqual(Position, q4.items[4]);
+    try std.testing.expectEqual(3, q4.len);
+    try std.testing.expectEqual(3, q4.items(.Position).len);
+    try std.testing.expectEqual(3, q4.items(.Health).len);
 }
 
 test "system" {}
