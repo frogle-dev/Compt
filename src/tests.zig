@@ -121,31 +121,31 @@ test "query" {
     defer q1.deinit(gpa);
     // std.debug.print("{any}\n", .{q1.items(.Position)});
     // std.debug.print("{any}\n", .{q1.items(.Velocity)});
-    try std.testing.expectEqual(4, q1.len);
-    try std.testing.expectEqual(4, q1.items(.Position).len);
-    try std.testing.expectEqual(4, q1.items(.Velocity).len);
+    try std.testing.expectEqual(4, q1.queryResultCount());
+    try std.testing.expectEqual(4, q1.getHasComponents(Position).len);
+    try std.testing.expectEqual(4, q1.getMaybeComponents(Velocity).len);
 
     var q2 = try registry.query(.{Position}, .{}, .{Health});
     defer q2.deinit(gpa);
     // std.debug.print("{any}\n", .{q2.items(.Position)});
     // std.debug.print("{any}\n", .{q2.items(.Health)});
-    try std.testing.expectEqual(4, q2.len);
-    try std.testing.expectEqual(4, q2.items(.Position).len);
-    try std.testing.expectEqual(4, q2.items(.Health).len);
+    try std.testing.expectEqual(4, q2.queryResultCount());
+    try std.testing.expectEqual(4, q2.getHasComponents(Position).len);
+    try std.testing.expectEqual(4, q2.getMaybeComponents(Health).len);
 
     var q3 = try registry.query(.{Position}, .{}, .{});
     defer q3.deinit(gpa);
     // std.debug.print("{any}\n", .{q3.items(.Position)});
-    try std.testing.expectEqual(4, q3.len);
-    try std.testing.expectEqual(4, q3.items(.Position).len);
+    try std.testing.expectEqual(4, q3.queryResultCount());
+    try std.testing.expectEqual(4, q3.getHasComponents(Position).len);
 
     var q4 = try registry.query(.{Position}, .{Attack}, .{Health});
     defer q4.deinit(gpa);
     // std.debug.print("{any}\n", .{q4.items(.Position)});
     // std.debug.print("{any}\n", .{q4.items(.Health)});
-    try std.testing.expectEqual(3, q4.len);
-    try std.testing.expectEqual(3, q4.items(.Position).len);
-    try std.testing.expectEqual(3, q4.items(.Health).len);
+    try std.testing.expectEqual(3, q4.queryResultCount());
+    try std.testing.expectEqual(3, q4.getHasComponents(Position).len);
+    try std.testing.expectEqual(3, q4.getMaybeComponents(Health).len);
 }
 
 test "system" {}

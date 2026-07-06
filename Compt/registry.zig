@@ -161,15 +161,29 @@ pub fn Registry(comptime templates: anytype) type {
         }
 
         pub fn Query(comptime has: anytype, comptime maybe: anytype) type {
+            const Result = QueryResult(has, maybe);
+
             return struct {
-                data_view: std.MultiArrayList(QueryResult(has, maybe)) = std.MultiArrayList(QueryResult(has, maybe)).empty,
+                data_view: std.MultiArrayList(Result) = std.MultiArrayList(Result).empty,
 
                 pub fn deinit(self: *@This(), gpa: std.mem.Allocator) void {
                     self.data_view.deinit(gpa);
                 }
 
-                pub fn getComponents(self: @This(), comptime T: type) []T {
-                    self.data_view.items(std.fmt.comptimePrint(".{}", .{shortTypeName(T)}));
+                pub fn queryResultCount(self: @This()) usize {
+                    return self.data_view.len;
+                }
+
+                pub fn getHasComponents(self: @This(), comptime Component: type) []*Component {
+                    const FieldEnum = std.meta.FieldEnum(Result);
+                    const field_tag = comptime std.meta.stringToEnum(FieldEnum, shortTypeName(Component)).?;
+                    return self.data_view.items(field_tag);
+                }
+
+                pub fn getMaybeComponents(self: @This(), comptime Component: type) []?*Component {
+                    const FieldEnum = std.meta.FieldEnum(Result);
+                    const field_tag = comptime std.meta.stringToEnum(FieldEnum, shortTypeName(Component)).?;
+                    return self.data_view.items(field_tag);
                 }
             };
         }
@@ -181,7 +195,7 @@ pub fn Registry(comptime templates: anytype) type {
         /// RETURNS - std.MultiArrayList containing a QueryResult which stores pointers to the components listed in has and maybe
         ///
         /// EX: query(.{Position, Velocity}, .{Attack}, .{Health})
-        pub fn query(self: Self, comptime has: anytype, comptime not: anytype, comptime maybe: anytype) !std.MultiArrayList(QueryResult(has, maybe)) {
+        pub fn query(self: Self, comptime has: anytype, comptime not: anytype, comptime maybe: anytype) !Query(has, maybe) {
             var query_result_soa = std.MultiArrayList(QueryResult(has, maybe)).empty;
 
             const has_fs = comptime getStructFields(@TypeOf(has)); // {Position, Velocity}
@@ -245,7 +259,9 @@ pub fn Registry(comptime templates: anytype) type {
                 }
             }
 
-            return query_result_soa;
+            return .{
+                .data_view = query_result_soa,
+            };
         }
 
         // TODO:
