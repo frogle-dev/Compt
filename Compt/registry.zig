@@ -138,7 +138,7 @@ pub fn Registry(comptime templates: anytype) type {
             inline for (has_fs, 0..) |has_f, i| {
                 const Component = @field(has, has_f.name);
                 names[i] = comptime shortTypeName(Component);
-                types[i] = *Component;
+                types[i] = ?*Component;
                 attrs[i] = std.builtin.Type.StructField.Attributes{
                     .@"align" = @alignOf(*Component),
                     .@"comptime" = false,
@@ -177,20 +177,26 @@ pub fn Registry(comptime templates: anytype) type {
                     return self.data_view.len;
                 }
 
-                /// get all the components of a specific type that were in the HAS filter
-                pub fn getHasComponents(self: @This(), comptime Component: type) []*Component {
+                pub fn getComponents(self: @This(), comptime Component: type) []?*Component {
                     const FieldEnum = std.meta.FieldEnum(Result);
                     const field_tag = comptime std.meta.stringToEnum(FieldEnum, shortTypeName(Component)).?;
                     return self.data_view.items(field_tag);
                 }
 
-                /// get all the components of a specific type that were in the MAYBE filter
-                /// optional because some entities did not contain the maybe components
-                pub fn getMaybeComponents(self: @This(), comptime Component: type) []?*Component {
-                    const FieldEnum = std.meta.FieldEnum(Result);
-                    const field_tag = comptime std.meta.stringToEnum(FieldEnum, shortTypeName(Component)).?;
-                    return self.data_view.items(field_tag);
-                }
+                // /// get all the components of a specific type that were in the HAS filter
+                // pub fn getHasComponents(self: @This(), comptime Component: type) []*Component {
+                //     const FieldEnum = std.meta.FieldEnum(Result);
+                //     const field_tag = comptime std.meta.stringToEnum(FieldEnum, shortTypeName(Component)).?;
+                //     return self.data_view.items(field_tag);
+                // }
+
+                // /// get all the components of a specific type that were in the MAYBE filter
+                // /// optional because some entities did not contain the maybe components
+                // pub fn getMaybeComponents(self: @This(), comptime Component: type) []?*Component {
+                //     const FieldEnum = std.meta.FieldEnum(Result);
+                //     const field_tag = comptime std.meta.stringToEnum(FieldEnum, shortTypeName(Component)).?;
+                //     return self.data_view.items(field_tag);
+                // }
             };
         }
 
@@ -242,8 +248,7 @@ pub fn Registry(comptime templates: anytype) type {
                     var query_result: QueryResult(has, maybe) = undefined;
 
                     inline for (comptime getStructFields(QueryResult(has, maybe))) |query_result_f| {
-                        const Component =
-                            if (@typeInfo(query_result_f.type) == .optional) std.meta.Child(std.meta.Child(query_result_f.type)) else std.meta.Child(query_result_f.type);
+                        const Component = std.meta.Child(std.meta.Child(query_result_f.type));
 
                         comptime var component_name: ?[]const u8 = null;
                         inline for (template_fs) |template_f| {
@@ -272,10 +277,24 @@ pub fn Registry(comptime templates: anytype) type {
         }
 
         // TODO:
-        pub fn enableComponent() !void {}
+        pub fn enableComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, componentIdx: usize) void {
+            const template_len = @field(self.templates, std.fmt.comptimePrint("{}", .{templateIdx})).len;
+            self.enabled_components[templateIdx].setValue((entityIdx * template_len) + componentIdx, true);
+        }
 
-        pub fn disableComponent() !void {}
+        pub fn disableComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, componentIdx: usize) void {
+            const template_len = @field(self.templates, std.fmt.comptimePrint("{}", .{templateIdx})).len;
+            self.enabled_components[templateIdx].setValue((entityIdx * template_len) + componentIdx, false);
+        }
 
-        pub fn isComponentEnabled() !bool {}
+        pub fn toggleComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, componentIdx: usize) void {
+            const template_len = @field(self.templates, std.fmt.comptimePrint("{}", .{templateIdx})).len;
+            self.enabled_components[templateIdx].toggle((entityIdx * template_len) + componentIdx);
+        }
+
+        pub fn isComponentEnabled(self: *Self, comptime templateIdx: usize, entityIdx: usize, componentIdx: usize) bool {
+            const template_len = @field(self.templates, std.fmt.comptimePrint("{}", .{templateIdx})).len;
+            return self.enabled_components[templateIdx].isSet((entityIdx * template_len) + componentIdx);
+        }
     };
 }
