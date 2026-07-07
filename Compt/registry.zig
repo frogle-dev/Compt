@@ -277,23 +277,23 @@ pub fn Registry(comptime templates: anytype) type {
         }
 
         // TODO:
-        pub fn enableComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, componentIdx: usize) void {
-            const template_len = @field(self.templates, std.fmt.comptimePrint("{}", .{templateIdx})).len;
+        pub fn enableComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, comptime componentIdx: usize) void {
+            const template_len = @field(@TypeOf(templates), std.fmt.comptimePrint("{}", .{templateIdx})).@"struct".fields.len;
             self.enabled_components[templateIdx].setValue((entityIdx * template_len) + componentIdx, true);
         }
 
-        pub fn disableComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, componentIdx: usize) void {
-            const template_len = @field(self.templates, std.fmt.comptimePrint("{}", .{templateIdx})).len;
+        pub fn disableComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, comptime componentIdx: usize) void {
+            const template_len = @field(@TypeOf(templates), std.fmt.comptimePrint("{}", .{templateIdx})).@"struct".fields.len;
             self.enabled_components[templateIdx].setValue((entityIdx * template_len) + componentIdx, false);
         }
 
-        pub fn toggleComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, componentIdx: usize) void {
-            const template_len = @field(self.templates, std.fmt.comptimePrint("{}", .{templateIdx})).len;
+        pub fn toggleComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, comptime componentIdx: usize) void {
+            const template_len = @field(@TypeOf(templates), std.fmt.comptimePrint("{}", .{templateIdx})).@"struct".fields.len;
             self.enabled_components[templateIdx].toggle((entityIdx * template_len) + componentIdx);
         }
 
-        pub fn isComponentEnabled(self: *Self, comptime templateIdx: usize, entityIdx: usize, componentIdx: usize) bool {
-            const template_len = @field(self.templates, std.fmt.comptimePrint("{}", .{templateIdx})).len;
+        pub fn isComponentEnabled(self: *Self, comptime templateIdx: usize, entityIdx: usize, comptime componentIdx: usize) bool {
+            const template_len = @field(@TypeOf(templates), std.fmt.comptimePrint("{}", .{templateIdx})).@"struct".fields.len;
             return self.enabled_components[templateIdx].isSet((entityIdx * template_len) + componentIdx);
         }
     };
