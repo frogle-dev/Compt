@@ -29,6 +29,18 @@ fn shortTypeName(comptime T: type) [:0]const u8 {
 pub fn Registry(comptime templates: anytype) type {
     const templates_fs = comptime getStructFields(@TypeOf(templates));
 
+    inline for (templates_fs) |templates_f| {
+        const Template = @field(templates, templates_f.name);
+        const template_fs = comptime getStructFields(Template);
+        inline for (template_fs, 0..) |template_f, template_i| {
+            inline for (template_fs, 0..) |other_f, other_i| {
+                if (template_i != other_i and template_f.type == other_f.type) {
+                    @compileError("Template '" ++ @typeName(Template) ++ "' has duplicated component type: " ++ @typeName(template_f.type));
+                }
+            }
+        }
+    }
+
     return struct {
         allocator: std.mem.Allocator,
 
@@ -182,21 +194,6 @@ pub fn Registry(comptime templates: anytype) type {
                     const field_tag = comptime std.meta.stringToEnum(FieldEnum, shortTypeName(Component)).?;
                     return self.data_view.items(field_tag);
                 }
-
-                // /// get all the components of a specific type that were in the HAS filter
-                // pub fn getHasComponents(self: @This(), comptime Component: type) []*Component {
-                //     const FieldEnum = std.meta.FieldEnum(Result);
-                //     const field_tag = comptime std.meta.stringToEnum(FieldEnum, shortTypeName(Component)).?;
-                //     return self.data_view.items(field_tag);
-                // }
-
-                // /// get all the components of a specific type that were in the MAYBE filter
-                // /// optional because some entities did not contain the maybe components
-                // pub fn getMaybeComponents(self: @This(), comptime Component: type) []?*Component {
-                //     const FieldEnum = std.meta.FieldEnum(Result);
-                //     const field_tag = comptime std.meta.stringToEnum(FieldEnum, shortTypeName(Component)).?;
-                //     return self.data_view.items(field_tag);
-                // }
             };
         }
 
@@ -257,7 +254,7 @@ pub fn Registry(comptime templates: anytype) type {
                             }
                         }
 
-                        if (component_name) |name| { // HAS field
+                        if (component_name and isComponentEnabled(templates_i, entity_i, a)) |name| { // HAS field
                             const FieldEnum = comptime std.meta.FieldEnum(Template);
                             const field_tag = comptime std.meta.stringToEnum(FieldEnum, name).?;
                             const slice = template_data.items(field_tag);
@@ -276,7 +273,6 @@ pub fn Registry(comptime templates: anytype) type {
             };
         }
 
-        // TODO:
         pub fn enableComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, comptime componentIdx: usize) void {
             const template_len = @field(@TypeOf(templates), std.fmt.comptimePrint("{}", .{templateIdx})).@"struct".fields.len;
             self.enabled_components[templateIdx].setValue((entityIdx * template_len) + componentIdx, true);
