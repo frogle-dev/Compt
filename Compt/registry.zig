@@ -273,24 +273,36 @@ pub fn Registry(comptime templates: anytype) type {
             };
         }
 
-        pub fn enableComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, comptime componentIdx: usize) void {
-            const template_len = @field(@TypeOf(templates), std.fmt.comptimePrint("{}", .{templateIdx})).@"struct".fields.len;
-            self.enabled_components[templateIdx].setValue((entityIdx * template_len) + componentIdx, true);
+        pub fn getEnabledComponentsIndex(comptime templateIdx: usize, entityIdx: usize, comptime Component: type) usize {
+            const components = comptime getStructFields(@field(@TypeOf(templates), std.fmt.comptimePrint("{}", .{templateIdx})));
+
+            comptime var componentIdx: ?usize = null;
+            inline for (components, 0..) |Comp, i| {
+                if (Comp == Component) {
+                    componentIdx = i;
+                    break;
+                }
+            }
+
+            if (!componentIdx) @compileError("Component '" ++ @typeName(Component) ++ "' does not exist in template " ++ templateIdx);
+
+            return (entityIdx * components.len) + componentIdx.?;
         }
 
-        pub fn disableComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, comptime componentIdx: usize) void {
-            const template_len = @field(@TypeOf(templates), std.fmt.comptimePrint("{}", .{templateIdx})).@"struct".fields.len;
-            self.enabled_components[templateIdx].setValue((entityIdx * template_len) + componentIdx, false);
+        pub fn enableComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, comptime Component: type) void {
+            self.enabled_components[templateIdx].setValue(getEnabledComponentsIndex(templateIdx, entityIdx, Component), true);
         }
 
-        pub fn toggleComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, comptime componentIdx: usize) void {
-            const template_len = @field(@TypeOf(templates), std.fmt.comptimePrint("{}", .{templateIdx})).@"struct".fields.len;
-            self.enabled_components[templateIdx].toggle((entityIdx * template_len) + componentIdx);
+        pub fn disableComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, comptime Component: type) void {
+            self.enabled_components[templateIdx].setValue(getEnabledComponentsIndex(templateIdx, entityIdx, Component), false);
         }
 
-        pub fn isComponentEnabled(self: *Self, comptime templateIdx: usize, entityIdx: usize, comptime componentIdx: usize) bool {
-            const template_len = @field(@TypeOf(templates), std.fmt.comptimePrint("{}", .{templateIdx})).@"struct".fields.len;
-            return self.enabled_components[templateIdx].isSet((entityIdx * template_len) + componentIdx);
+        pub fn toggleComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, comptime Component: type) void {
+            self.enabled_components[templateIdx].toggle(getEnabledComponentsIndex(templateIdx, entityIdx, Component));
+        }
+
+        pub fn isComponentEnabled(self: *Self, comptime templateIdx: usize, entityIdx: usize, comptime Component: type) bool {
+            return self.enabled_components[templateIdx].isSet(getEnabledComponentsIndex(templateIdx, entityIdx, Component));
         }
     };
 }
