@@ -254,7 +254,7 @@ pub fn Registry(comptime templates: anytype) type {
                             }
                         }
 
-                        if (component_name and isComponentEnabled(templates_i, entity_i, a)) |name| { // HAS field
+                        if (component_name and isComponentEnabled(templates_i, entity_i, Component)) |name| { // HAS field
                             const FieldEnum = comptime std.meta.FieldEnum(Template);
                             const field_tag = comptime std.meta.stringToEnum(FieldEnum, name).?;
                             const slice = template_data.items(field_tag);
@@ -284,7 +284,7 @@ pub fn Registry(comptime templates: anytype) type {
                 }
             }
 
-            if (!componentIdx) @compileError("Component '" ++ @typeName(Component) ++ "' does not exist in template " ++ templateIdx);
+            if (!componentIdx) |_| @compileError("Component '" ++ @typeName(Component) ++ "' does not exist in template " ++ templateIdx);
 
             return (entityIdx * components.len) + componentIdx.?;
         }
