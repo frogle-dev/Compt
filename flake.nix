@@ -1,5 +1,5 @@
 {
-  description = "comp-ecs zig devenv";
+  description = "Compt zig devenv";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
