@@ -9,8 +9,24 @@ pub const EntityPosition = struct {
     entity_idx: EntityIdx,
 };
 
-fn getStructFields(comptime T: type) []const std.builtin.Type.StructField {
-    return @typeInfo(T).@"struct".fields;
+pub const StructInfo = struct {
+    names: []const [:0]const u8,
+    types: []const type,
+    attrs: []const std.builtin.Type.Struct.FieldAttributes,
+    len: usize,
+};
+
+fn getStructFields(comptime T: type) StructInfo {
+    comptime {
+        const info = @typeInfo(T).@"struct";
+
+        return .{
+            .names = info.field_names,
+            .types = info.field_types,
+            .attrs = info.field_attrs,
+            .len = info.field_names.len,
+        };
+    }
 }
 
 /// Removes file name prepended to type name. ie: tests.Position. Used so accessing component slices from query is more elegant
@@ -25,34 +41,41 @@ fn shortTypeName(comptime T: type) [:0]const u8 {
     return full;
 }
 
-/// Registry stores and manages all the data of the ECS
-pub fn Registry(comptime templates: anytype) type {
-    const templates_fs = comptime getStructFields(@TypeOf(templates));
+fn checkForDuplicateComponents(comptime templates: anytype, comptime templates_info: StructInfo) void {
+    comptime {
+        for (templates_info.names) |template_name| {
+            const Template = @field(templates, template_name);
+            const template_info = getStructFields(Template);
 
-    inline for (templates_fs) |templates_f| {
-        const Template = @field(templates, templates_f.name);
-        const template_fs = comptime getStructFields(Template);
-        inline for (template_fs, 0..) |template_f, template_i| {
-            inline for (template_fs, 0..) |other_f, other_i| {
-                if (template_i != other_i and template_f.type == other_f.type) {
-                    @compileError("Template '" ++ @typeName(Template) ++ "' has duplicated component type: " ++ @typeName(template_f.type));
+            for (template_info.types, 0..) |component_type, component_i| {
+                for (template_info.types, 0..) |other_type, other_i| {
+                    if (component_i != other_i and component_type == other_type) {
+                        @compileError("Template '" ++ @typeName(Template) ++ "' has duplicate component type: " ++ @typeName(component_type));
+                    }
                 }
             }
         }
     }
+}
+
+/// Registry stores and manages all the data of the ECS
+pub fn Registry(comptime templates: anytype) type {
+    const ts_info = comptime getStructFields(@TypeOf(templates));
+
+    checkForDuplicateComponents(templates, ts_info);
 
     return struct {
         allocator: std.mem.Allocator,
 
         templates: TemplatesStorage(),
-        enabled_components: [templates_fs.len]std.DynamicBitSet,
+        enabled_components: [ts_info.len]std.DynamicBitSet,
         entity_positions: std.AutoHashMap(EntityID, EntityPosition),
         next_id: EntityID = 0,
 
         const Self = @This();
 
         fn TemplatesStorage() type {
-            comptime var types: [templates_fs.len]type = undefined;
+            comptime var types: [ts_info.len]type = undefined;
 
             inline for (templates_fs, 0..) |templates_f, templates_i| {
                 const Template = @field(templates, templates_f.name);
