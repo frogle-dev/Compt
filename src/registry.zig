@@ -4,6 +4,7 @@ pub const TemplateIdx = usize;
 pub const EntityIdx = usize;
 pub const Entity = u32;
 
+// TODO: use type instead of template_idx
 pub const EntityLocation = struct {
     template_idx: TemplateIdx,
     entity_idx: EntityIdx,
@@ -31,9 +32,11 @@ fn getStructFields(comptime T: type) StructInfo {
 
 /// ex: "main.Position" -> "Position"
 fn stripTypePrefix(comptime name: [:0]const u8) []const u8 {
-    _, const after = std.mem.cutScalarLast(u8, name, '.') orelse return name;
+    comptime {
+        _, const after = std.mem.cutScalarLast(u8, name, '.') orelse return name;
 
-    return after;
+        return after;
+    }
 }
 
 fn checkForDuplicateComponents(comptime templates: anytype, comptime templates_info: StructInfo) void {
@@ -153,138 +156,149 @@ pub fn World(comptime templates: anytype) type {
             return entity;
         }
 
-        pub fn QueryResult(comptime has: anytype, comptime maybe: anytype) type {
+        pub fn QueryView(comptime has: anytype) type {
             const has_info = comptime getStructFields(@TypeOf(has));
-            const maybe_info = comptime getStructFields(@TypeOf(maybe));
-            const len = comptime has_info.len + maybe_info.len;
 
-            comptime var names: [len][]const u8 = undefined;
-            comptime var types: [len]type = undefined;
-            comptime var attrs: [len]std.builtin.Type.StructField.Attributes = undefined;
+            comptime var types: [has_info.len]type = undefined;
 
-            inline for (has_fs, 0..) |has_f, i| {
-                const Component = @field(has, has_f.name);
-                names[i] = comptime shortTypeName(Component);
-                types[i] = ?*Component;
-                attrs[i] = std.builtin.Type.StructField.Attributes{
-                    .@"align" = @alignOf(*Component),
-                    .@"comptime" = false,
-                    .default_value_ptr = null,
-                };
+            inline for (has_info.names, 0..) |name, i| {
+                const Component: type = @field(has, name);
+                types[i] = []Component;
             }
 
-            inline for (maybe_fs, 0..) |maybe_f, i| {
-                const Component = @field(maybe, maybe_f.name);
-                names[has_fs.len + i] = comptime shortTypeName(Component);
-                types[has_fs.len + i] = ?*Component;
-                attrs[has_fs.len + i] = std.builtin.Type.StructField.Attributes{
-                    .@"align" = @alignOf(*Component),
-                    .@"comptime" = false,
-                    .default_value_ptr = null,
-                };
-            }
-
-            return @Struct(.auto, null, &names, &types, &attrs);
+            return @Tuple(&types);
         }
 
-        /// returned from query function
-        /// data_view - contains pointers to the data found in the query
-        pub fn Query(comptime has: anytype, comptime maybe: anytype) type {
-            const Result = QueryResult(has, maybe);
+        pub fn Query(comptime has: anytype) type {
+            const View = QueryView(has);
 
             return struct {
-                data_view: std.MultiArrayList(Result) = std.MultiArrayList(Result).empty,
+                data_view: View = .empty,
 
-                pub fn deinit(self: *@This(), gpa: std.mem.Allocator) void {
-                    self.data_view.deinit(gpa);
+                pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+                    self.data_view.deinit(allocator);
                 }
 
-                /// number of entities sourced from by the query
-                pub fn queryResultCount(self: @This()) usize {
+                pub fn len(self: *const @This()) usize {
                     return self.data_view.len;
                 }
 
-                pub fn getComponents(self: @This(), comptime Component: type) []?*Component {
-                    const FieldEnum = std.meta.FieldEnum(Result);
-                    const field_tag = comptime std.meta.stringToEnum(FieldEnum, shortTypeName(Component)).?;
-                    return self.data_view.items(field_tag);
+                pub fn getComponents(self: *@This(), comptime Component: type) []Component {
+                    const info = comptime getStructFields(View);
+
+                    inline for (info.names, info.types) |name, ArrType| {
+                        // slice must be removed for original type
+                        const Type = std.meta.Child(ArrType);
+
+                        if (Type == Component) {
+                            return @field(self.data_view, name);
+                        }
+                    }
+
+                    @compileError(@typeName(Component) ++ " does not match any components in the query");
                 }
             };
         }
 
-        /// Queries for component types within the templates
-        /// has - tuple of types, what components an template must have
-        /// not - tuple of types, what components an template must not have
-        /// maybe - tuple of types, what components an template could have, captures components if an template has them
-        /// RETURNS - Query struct
-        ///
-        /// EX: query(.{Position, Velocity}, .{Attack}, .{Health})
-        pub fn query(self: *Self, comptime has: anytype, comptime not: anytype, comptime maybe: anytype) !Query(has, maybe) {
-            var query_result_soa = std.MultiArrayList(QueryResult(has, maybe)).empty;
+        fn templateMatches(
+            comptime not: anytype,
+            comptime has: anytype,
+            comptime not_info: StructInfo,
+            comptime has_info: StructInfo,
+            comptime template_name: [:0]const u8,
+        ) bool {
+            const Template: type = @field(templates, template_name); // Player
+            const template_info = getStructFields(Template); // {Health, Position, Velocity, Attack, ...}
 
-            const has_fs = comptime getStructFields(@TypeOf(has)); // {Position, Velocity}
-            const not_fs = comptime getStructFields(@TypeOf(not)); // {Attack}
+            var matched: usize = 0;
 
-            templates_for: inline for (templates_fs, 0..) |templates_f, templates_i| {
-                const Template = @field(templates, templates_f.name); // Player
-                const template_fs = comptime getStructFields(Template); // {Health, Position, Velocity, Attack, ...}
+            for (template_info.types) |ComponentType| {
+                // skip templates containing components in 'not'
+                for (not_info.names) |name| {
+                    const Not: type = @field(not, name);
 
-                comptime var matched: usize = 0;
-                inline for (template_fs) |template_f| {
-                    // skip templates containing components in NOT
-                    inline for (not_fs) |not_f| {
-                        const Not = @field(not, not_f.name);
-
-                        if (template_f.type == Not) {
-                            continue :templates_for;
-                        }
-                    }
-
-                    // skip templates not containing all components in HAS
-                    inline for (has_fs) |has_f| {
-                        const Has = @field(has, has_f.name);
-
-                        if (template_f.type == Has) {
-                            matched += 1;
-                            break;
-                        }
+                    if (ComponentType == Not) {
+                        return false;
                     }
                 }
-                if (matched != has_fs.len) {
-                    continue :templates_for;
+
+                // skip templates not containing all components in 'has'
+                for (has_info.names) |name| {
+                    const Has: type = @field(has, name);
+
+                    if (ComponentType == Has) {
+                        matched += 1;
+                        break;
+                    }
+                }
+            }
+
+            if (matched != has_info.len) {
+                return false;
+            }
+
+            return true;
+        }
+
+        /// Queries for component types within the templates
+        /// has - tuple of types, what components a template must have
+        /// not - tuple of types, what components a template must not have
+        /// maybe - tuple of types, what components a template could have
+        ///
+        /// EX: query(.{Position, Velocity}, .{Attack}, .{Health})
+        pub fn query(self: *@This(), comptime has: anytype, comptime not: anytype) !Query(has) {
+            var query_element_soa: std.MultiArrayList(QueryElement(has)) = .empty;
+
+            const has_info = getStructFields(@TypeOf(has)); // {Position, Velocity}
+            const not_info = getStructFields(@TypeOf(not)); // {Attack}
+
+            inline for (ts_info.names, 0..) |template_name, template_i| {
+                comptime {
+                    if (!templateMatches(
+                        not,
+                        has,
+                        not_info,
+                        has_info,
+                        template_name,
+                    )) {
+                        continue;
+                    }
                 }
 
                 // get found data
-                const template_data = @field(self.templates, std.fmt.comptimePrint("{}", .{templates_i}));
+                var template_data = getTemplateData(
+                    self.storage,
+                    ts_info.types[template_i],
+                    std.fmt.comptimePrint("{}", .{template_i}),
+                );
+
                 for (0..template_data.len) |entity_i| {
-                    var query_result: QueryResult(has, maybe) = undefined;
+                    const Element = QueryElement(has);
+                    const element_info = comptime getStructFields(Element);
 
-                    inline for (comptime getStructFields(QueryResult(has, maybe))) |query_result_f| {
-                        const Component = std.meta.Child(std.meta.Child(query_result_f.type));
+                    var query_element: Element = undefined;
 
-                        comptime var component_name: ?[]const u8 = null;
-                        inline for (template_fs) |template_f| {
-                            if (template_f.type == Component) {
-                                component_name = template_f.name;
-                            }
-                        }
+                    inline for (element_info.names, element_info.types) |name, QueryComponent| {
+                        // QueryComponent is an ?*, so those need to be removed to get the original type
+                        const Component = std.meta.Child(std.meta.Child(QueryComponent));
 
-                        if (component_name and isComponentEnabled(templates_i, entity_i, Component)) |name| { // HAS field
+                        const query_data = @field(query_element, name);
+
+                        // 'has' field
+                        if (query_data) {
                             const FieldEnum = comptime std.meta.FieldEnum(Template);
                             const field_tag = comptime std.meta.stringToEnum(FieldEnum, name).?;
                             const slice = template_data.items(field_tag);
-                            @field(query_result, shortTypeName(Component)) = &slice[entity_i];
-                        } else { // MAYBE field
-                            @field(query_result, shortTypeName(Component)) = null;
+                            query_data = &slice[entity_i];
                         }
                     }
 
-                    try query_result_soa.append(self.allocator, query_result);
+                    try query_element_soa.append(self.allocator, query_element);
                 }
             }
 
             return .{
-                .data_view = query_result_soa,
+                .data_view = query_element_soa,
             };
         }
     };
