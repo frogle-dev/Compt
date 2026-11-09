@@ -83,7 +83,8 @@ pub fn World(comptime templates: anytype) type {
             }
         }
 
-        fn getTemplateData(storage: *const StorageType(), comptime T: type, comptime template_name: [:0]const u8) *std.MultiArrayList(T) {
+        fn getTemplateData(storage: *const StorageType(), comptime T: type) *std.MultiArrayList(T) {
+            inline for (
             return &@field(storage, template_name);
         }
 
@@ -244,8 +245,6 @@ pub fn World(comptime templates: anytype) type {
         ///
         /// EX: query(.{Position, Velocity}, .{Attack}, .{Health})
         pub fn query(self: *@This(), comptime has: anytype, comptime not: anytype) !Query(has) {
-            var query_element_soa: std.MultiArrayList(QueryElement(has)) = .empty;
-
             const has_info = getStructFields(@TypeOf(has)); // {Position, Velocity}
             const not_info = getStructFields(@TypeOf(not)); // {Attack}
 
