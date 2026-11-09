@@ -2,9 +2,9 @@ const std = @import("std");
 
 pub const TemplateIdx = usize;
 pub const EntityIdx = usize;
-pub const EntityID = u32;
+pub const Entity = u32;
 
-pub const EntityPosition = struct {
+pub const EntityLocation = struct {
     template_idx: TemplateIdx,
     entity_idx: EntityIdx,
 };
@@ -29,16 +29,11 @@ fn getStructFields(comptime T: type) StructInfo {
     }
 }
 
-/// Removes file name prepended to type name. ie: tests.Position. Used so accessing component slices from query is more elegant
-fn shortTypeName(comptime T: type) [:0]const u8 {
-    const full = @typeName(T);
+/// ex: "main.Position" -> "Position"
+fn stripTypePrefix(comptime name: [:0]const u8) []const u8 {
+    _, const after = std.mem.cutScalarLast(u8, name, '.') orelse return name;
 
-    comptime var i = full.len;
-    while (i > 0) : (i -= 1) {
-        if (full[i - 1] == '.') return full[i..];
-    }
-
-    return full;
+    return after;
 }
 
 fn checkForDuplicateComponents(comptime templates: anytype, comptime templates_info: StructInfo) void {
@@ -58,8 +53,7 @@ fn checkForDuplicateComponents(comptime templates: anytype, comptime templates_i
     }
 }
 
-/// Registry stores and manages all the data of the ECS
-pub fn Registry(comptime templates: anytype) type {
+pub fn World(comptime templates: anytype) type {
     const ts_info = comptime getStructFields(@TypeOf(templates));
 
     checkForDuplicateComponents(templates, ts_info);
@@ -67,104 +61,102 @@ pub fn Registry(comptime templates: anytype) type {
     return struct {
         allocator: std.mem.Allocator,
 
-        templates: TemplatesStorage(),
-        enabled_components: [ts_info.len]std.DynamicBitSet,
-        entity_positions: std.AutoHashMap(EntityID, EntityPosition),
-        next_id: EntityID = 0,
+        storage: StorageType(),
 
-        const Self = @This();
+        entity_locations: std.AutoHashMap(Entity, EntityLocation),
+        next_entity: Entity = 0,
 
-        fn TemplatesStorage() type {
-            comptime var types: [ts_info.len]type = undefined;
+        fn StorageType() type {
+            comptime {
+                var types: [ts_info.len]type = undefined;
 
-            inline for (templates_fs, 0..) |templates_f, templates_i| {
-                const Template = @field(templates, templates_f.name);
+                for (ts_info.names, 0..) |template_name, template_i| {
+                    const Template = @field(templates, template_name);
 
-                types[templates_i] = std.MultiArrayList(Template);
+                    types[template_i] = std.MultiArrayList(Template);
+                }
+
+                return @Tuple(&types);
             }
-
-            return @Tuple(&types);
         }
 
-        fn initTemplatesStorage() TemplatesStorage() {
-            var storage: TemplatesStorage() = undefined;
+        fn getTemplateData(storage: *const StorageType(), comptime T: type, comptime template_name: [:0]const u8) *std.MultiArrayList(T) {
+            return &@field(storage, template_name);
+        }
 
-            const template_storage_fs = comptime getStructFields(TemplatesStorage());
-            inline for (template_storage_fs) |template_storage_f| {
-                @field(storage, template_storage_f.name) = .{};
+        fn initTemplatesStorage() StorageType() {
+            var storage: StorageType() = undefined;
+
+            const storage_info = comptime getStructFields(StorageType());
+            inline for (storage_info.names, 0..) |name, i| {
+                getTemplateData(&storage, storage_info.types[i], name).* = .empty;
             }
 
             return storage;
         }
 
-        pub fn init(allocator: std.mem.Allocator) !Self {
-            var enabled_components: [templates_fs.len]std.DynamicBitSet = undefined;
-            for (0..enabled_components.len) |i| {
-                enabled_components[i] = try std.DynamicBitSet.initFull(allocator, 0);
-            }
-
+        pub fn init(allocator: std.mem.Allocator) !@This() {
             return .{
                 .allocator = allocator,
-                .templates = initTemplatesStorage(),
-                .enabled_components = enabled_components,
-                .entity_positions = std.AutoHashMap(EntityID, EntityPosition).init(allocator),
+                .storage = initTemplatesStorage(),
+                .entity_locations = .init(allocator),
             };
         }
 
-        pub fn deinit(self: *Self) void {
-            const template_storage_fs = comptime getStructFields(TemplatesStorage());
-            inline for (template_storage_fs) |template_storage_f| {
-                @field(self.templates, template_storage_f.name).deinit(self.allocator);
+        pub fn deinit(self: *@This()) void {
+            const storage_info = comptime getStructFields(StorageType());
+            inline for (storage_info.names, 0..) |name, i| {
+                getTemplateData(self.storage, storage_info.types[i], name)
+                    .deinit(self.allocator);
             }
 
-            for (&self.enabled_components) |*dynamic_bit_set| {
-                dynamic_bit_set.deinit();
-            }
-
-            self.entity_positions.deinit();
+            self.entity_locations.deinit();
         }
 
-        /// Registers a new entity: matches entity to the correct template and adds the data
-        /// entity_data - struct instance containing data for an entity matching an template
-        pub fn spawn(self: *Self, entity_data: anytype) !EntityID {
-            const Template = @TypeOf(entity_data);
+        pub fn spawn(self: *@This(), data: anytype) !Entity {
+            const Template = @TypeOf(data);
 
-            comptime var template_fs_len: usize = undefined;
-            comptime var templates_i: ?TemplateIdx = null;
-            inline for (templates_fs, 0..) |templates_f, i| {
-                if (@field(templates, templates_f.name) == Template) {
-                    templates_i = i;
+            comptime var template_info_len: usize = undefined;
+            comptime var matched_i: ?TemplateIdx = null;
+            inline for (ts_info, 0..) |template_name, i| {
+                if (@field(templates, template_name) == Template) {
+                    matched_i = i;
 
-                    template_fs_len = comptime getStructFields(Template).len;
+                    template_info_len = getStructFields(Template).len;
                     break;
                 }
             }
 
-            const id = self.next_id;
+            const template_i = matched_i orelse {
+                @compileError(@typeName(Template) ++ ", used in spawn, does not match the type of any templates");
+            };
 
-            const template_idx = templates_i orelse @compileError(@typeName(Template) ++ " does not match the type of any templates");
+            var template_data = getTemplateData(
+                self.storage,
+                ts_info.types[template_i],
+                std.fmt.comptimePrint("{}", .{template_i}),
+            );
 
-            try self.enabled_components[template_idx].resize(self.enabled_components[template_idx].capacity() + template_fs_len, true);
+            try template_data.append(self.allocator, data);
 
-            // const template_data = &@field(self.templates, std.fmt.comptimePrint("{}", .{template_idx}));
-            var template_data = &@field(self.templates, std.fmt.comptimePrint("{}", .{template_idx}));
-            try template_data.append(self.allocator, entity_data);
             const entity_pos_idx = template_data.len - 1;
 
-            try self.entity_positions.put(id, .{
-                .template_idx = template_idx,
+            const entity = self.next_entity;
+
+            try self.entity_locations.put(entity, .{
+                .template_idx = template_i,
                 .entity_idx = entity_pos_idx,
             });
 
-            self.next_id += 1;
+            self.next_entity += 1;
 
-            return id;
+            return entity;
         }
 
         pub fn QueryResult(comptime has: anytype, comptime maybe: anytype) type {
-            const has_fs = comptime getStructFields(@TypeOf(has));
-            const maybe_fs = comptime getStructFields(@TypeOf(maybe));
-            const len = comptime has_fs.len + maybe_fs.len;
+            const has_info = comptime getStructFields(@TypeOf(has));
+            const maybe_info = comptime getStructFields(@TypeOf(maybe));
+            const len = comptime has_info.len + maybe_info.len;
 
             comptime var names: [len][]const u8 = undefined;
             comptime var types: [len]type = undefined;
@@ -294,38 +286,6 @@ pub fn Registry(comptime templates: anytype) type {
             return .{
                 .data_view = query_result_soa,
             };
-        }
-
-        pub fn getEnabledComponentsIndex(comptime templateIdx: usize, entityIdx: usize, comptime Component: type) usize {
-            const components = comptime getStructFields(@field(@TypeOf(templates), std.fmt.comptimePrint("{}", .{templateIdx})));
-
-            comptime var componentIdx: ?usize = null;
-            inline for (components, 0..) |Comp, i| {
-                if (Comp == Component) {
-                    componentIdx = i;
-                    break;
-                }
-            }
-
-            if (!componentIdx) |_| @compileError("Component '" ++ @typeName(Component) ++ "' does not exist in template " ++ templateIdx);
-
-            return (entityIdx * components.len) + componentIdx.?;
-        }
-
-        pub fn enableComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, comptime Component: type) void {
-            self.enabled_components[templateIdx].setValue(getEnabledComponentsIndex(templateIdx, entityIdx, Component), true);
-        }
-
-        pub fn disableComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, comptime Component: type) void {
-            self.enabled_components[templateIdx].setValue(getEnabledComponentsIndex(templateIdx, entityIdx, Component), false);
-        }
-
-        pub fn toggleComponent(self: *Self, comptime templateIdx: usize, entityIdx: usize, comptime Component: type) void {
-            self.enabled_components[templateIdx].toggle(getEnabledComponentsIndex(templateIdx, entityIdx, Component));
-        }
-
-        pub fn isComponentEnabled(self: *Self, comptime templateIdx: usize, entityIdx: usize, comptime Component: type) bool {
-            return self.enabled_components[templateIdx].isSet(getEnabledComponentsIndex(templateIdx, entityIdx, Component));
         }
     };
 }
