@@ -173,14 +173,11 @@ pub fn World(comptime templates: anytype) type {
             const View = QueryView(has);
 
             return struct {
-                data_view: View = .empty,
-
-                pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-                    self.data_view.deinit(allocator);
-                }
+                data_view: View,
 
                 pub fn len(self: *const @This()) usize {
-                    return self.data_view.len;
+                    // all the slices in the view are the same size
+                    return self.data_view.@"0".len;
                 }
 
                 pub fn getComponents(self: *@This(), comptime Component: type) []Component {
