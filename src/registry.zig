@@ -6,7 +6,7 @@ pub const Entity = u32;
 
 // TODO: use type instead of template_idx
 pub const EntityLocation = struct {
-    template_idx: TemplateIdx,
+    Template: type,
     entity_idx: EntityIdx,
 };
 
@@ -17,7 +17,7 @@ pub const StructInfo = struct {
     len: usize,
 };
 
-fn getStructFields(comptime T: type) StructInfo {
+fn structInfo(comptime T: type) StructInfo {
     comptime {
         const info = @typeInfo(T).@"struct";
 
@@ -43,7 +43,7 @@ fn checkForDuplicateComponents(comptime templates: anytype, comptime templates_i
     comptime {
         for (templates_info.names) |template_name| {
             const Template = @field(templates, template_name);
-            const template_info = getStructFields(Template);
+            const template_info = structInfo(Template);
 
             for (template_info.types, 0..) |component_type, component_i| {
                 for (template_info.types, 0..) |other_type, other_i| {
@@ -57,7 +57,7 @@ fn checkForDuplicateComponents(comptime templates: anytype, comptime templates_i
 }
 
 pub fn World(comptime templates: anytype) type {
-    const ts_info = comptime getStructFields(@TypeOf(templates));
+    const ts_info = comptime structInfo(@TypeOf(templates));
 
     checkForDuplicateComponents(templates, ts_info);
 
@@ -84,16 +84,24 @@ pub fn World(comptime templates: anytype) type {
         }
 
         fn getTemplateData(storage: *const StorageType(), comptime T: type) *std.MultiArrayList(T) {
-            inline for (
-            return &@field(storage, template_name);
+            comptime {
+                const info = structInfo(StorageType());
+                for (info.names, info.types) |name, U| {
+                    if (T == U) {
+                        return &@field(storage, name);
+                    }
+                }
+
+                @compileError(@typeName(T) ++ " is not in any template");
+            }
         }
 
         fn initTemplatesStorage() StorageType() {
             var storage: StorageType() = undefined;
 
-            const storage_info = comptime getStructFields(StorageType());
-            inline for (storage_info.names, 0..) |name, i| {
-                getTemplateData(&storage, storage_info.types[i], name).* = .empty;
+            const storage_info = comptime structInfo(StorageType());
+            inline for (storage_info.types) |T| {
+                getTemplateData(&storage, T).* = .empty;
             }
 
             return storage;
@@ -108,9 +116,9 @@ pub fn World(comptime templates: anytype) type {
         }
 
         pub fn deinit(self: *@This()) void {
-            const storage_info = comptime getStructFields(StorageType());
-            inline for (storage_info.names, 0..) |name, i| {
-                getTemplateData(self.storage, storage_info.types[i], name)
+            const storage_info = comptime structInfo(StorageType());
+            inline for (storage_info.types) |T| {
+                getTemplateData(self.storage, T)
                     .deinit(self.allocator);
             }
 
@@ -120,25 +128,20 @@ pub fn World(comptime templates: anytype) type {
         pub fn spawn(self: *@This(), data: anytype) !Entity {
             const Template = @TypeOf(data);
 
-            comptime var template_info_len: usize = undefined;
-            comptime var matched_i: ?TemplateIdx = null;
-            inline for (ts_info, 0..) |template_name, i| {
-                if (@field(templates, template_name) == Template) {
-                    matched_i = i;
-
-                    template_info_len = getStructFields(Template).len;
+            comptime var matched = false;
+            inline for (ts_info.types) |T| {
+                if (T == Template) {
+                    matched = true;
                     break;
                 }
             }
-
-            const template_i = matched_i orelse {
-                @compileError(@typeName(Template) ++ ", used in spawn, does not match the type of any templates");
-            };
+            if (!matched) {
+                @compileError("data of type " ++ @typeName(Template) ++ " does not match any template");
+            }
 
             var template_data = getTemplateData(
                 self.storage,
-                ts_info.types[template_i],
-                std.fmt.comptimePrint("{}", .{template_i}),
+                Template,
             );
 
             try template_data.append(self.allocator, data);
@@ -148,7 +151,7 @@ pub fn World(comptime templates: anytype) type {
             const entity = self.next_entity;
 
             try self.entity_locations.put(entity, .{
-                .template_idx = template_i,
+                .Template = Template,
                 .entity_idx = entity_pos_idx,
             });
 
@@ -158,7 +161,7 @@ pub fn World(comptime templates: anytype) type {
         }
 
         pub fn QueryView(comptime has: anytype) type {
-            const has_info = comptime getStructFields(@TypeOf(has));
+            const has_info = comptime structInfo(@TypeOf(has));
 
             comptime var types: [has_info.len]type = undefined;
 
@@ -174,7 +177,7 @@ pub fn World(comptime templates: anytype) type {
             const View = QueryView(has);
 
             return struct {
-                data_view: View,
+                data_view: View, // TODO: make this an array of views for each matched archetype
 
                 pub fn len(self: *const @This()) usize {
                     // all the slices in the view are the same size
@@ -182,7 +185,7 @@ pub fn World(comptime templates: anytype) type {
                 }
 
                 pub fn getComponents(self: *@This(), comptime Component: type) []Component {
-                    const info = comptime getStructFields(View);
+                    const info = comptime structInfo(View);
 
                     inline for (info.names, info.types) |name, ArrType| {
                         // slice must be removed for original type
@@ -203,10 +206,9 @@ pub fn World(comptime templates: anytype) type {
             comptime has: anytype,
             comptime not_info: StructInfo,
             comptime has_info: StructInfo,
-            comptime template_name: [:0]const u8,
+            comptime Template: type,
         ) bool {
-            const Template: type = @field(templates, template_name); // Player
-            const template_info = getStructFields(Template); // {Health, Position, Velocity, Attack, ...}
+            const template_info = structInfo(Template); // {Health, Position, Velocity, Attack, ...}
 
             var matched: usize = 0;
 
@@ -241,21 +243,21 @@ pub fn World(comptime templates: anytype) type {
         /// Queries for component types within the templates
         /// has - tuple of types, what components a template must have
         /// not - tuple of types, what components a template must not have
-        /// maybe - tuple of types, what components a template could have
         ///
         /// EX: query(.{Position, Velocity}, .{Attack}, .{Health})
         pub fn query(self: *@This(), comptime has: anytype, comptime not: anytype) !Query(has) {
-            const has_info = getStructFields(@TypeOf(has)); // {Position, Velocity}
-            const not_info = getStructFields(@TypeOf(not)); // {Attack}
+            const has_info = structInfo(@TypeOf(has)); // {Position, Velocity}
+            const not_info = structInfo(@TypeOf(not)); // {Attack}
 
-            inline for (ts_info.names, 0..) |template_name, template_i| {
+            const result_query: Query(has) = .{};
+            inline for (ts_info.types) |Template| {
                 comptime {
                     if (!templateMatches(
                         not,
                         has,
                         not_info,
                         has_info,
-                        template_name,
+                        Template,
                     )) {
                         continue;
                     }
@@ -264,38 +266,39 @@ pub fn World(comptime templates: anytype) type {
                 // get found data
                 var template_data = getTemplateData(
                     self.storage,
-                    ts_info.types[template_i],
-                    std.fmt.comptimePrint("{}", .{template_i}),
+                    Template,
                 );
 
-                for (0..template_data.len) |entity_i| {
-                    const Element = QueryElement(has);
-                    const element_info = comptime getStructFields(Element);
-
-                    var query_element: Element = undefined;
-
-                    inline for (element_info.names, element_info.types) |name, QueryComponent| {
-                        // QueryComponent is an ?*, so those need to be removed to get the original type
-                        const Component = std.meta.Child(std.meta.Child(QueryComponent));
-
-                        const query_data = @field(query_element, name);
-
-                        // 'has' field
-                        if (query_data) {
-                            const FieldEnum = comptime std.meta.FieldEnum(Template);
-                            const field_tag = comptime std.meta.stringToEnum(FieldEnum, name).?;
-                            const slice = template_data.items(field_tag);
-                            query_data = &slice[entity_i];
-                        }
-                    }
-
-                    try query_element_soa.append(self.allocator, query_element);
+                inline for (has_info.types) |C| {
+                    result_query.getComponents(C).* = template_data.items(C);
                 }
+
+                // for (0..template_data.len) |entity_i| {
+                //     const Element = QueryElement(has);
+                //     const element_info = comptime structInfo(Element);
+                //
+                //     var query_element: Element = undefined;
+                //
+                //     inline for (element_info.names, element_info.types) |name, QueryComponent| {
+                //         // QueryComponent is an ?*, so those need to be removed to get the original type
+                //         const Component = std.meta.Child(std.meta.Child(QueryComponent));
+                //
+                //         const query_data = @field(query_element, name);
+                //
+                //         // 'has' field
+                //         if (query_data) {
+                //             const FieldEnum = comptime std.meta.FieldEnum(Template);
+                //             const field_tag = comptime std.meta.stringToEnum(FieldEnum, name).?;
+                //             const slice = template_data.items(field_tag);
+                //             query_data = &slice[entity_i];
+                //         }
+                //     }
+                //
+                //     try query_element_soa.append(self.allocator, query_element);
+                // }
             }
 
-            return .{
-                .data_view = query_element_soa,
-            };
+            return result_query;
         }
     };
 }
