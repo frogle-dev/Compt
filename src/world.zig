@@ -4,7 +4,6 @@ pub const TemplateIdx = usize;
 pub const EntityIdx = usize;
 pub const Entity = u32;
 
-// TODO: use type instead of template_idx
 pub const EntityLocation = struct {
     Template: type,
     entity_idx: EntityIdx,
@@ -23,8 +22,8 @@ fn structInfo(comptime T: type) StructInfo {
 
         return .{
             .names = info.field_names,
-            .types = info.field_types,
-            .attrs = info.field_attrs,
+            // .types = info.field_types,
+            // .attrs = info.field_attrs,
             .len = info.field_names.len,
         };
     }
@@ -39,7 +38,7 @@ fn stripTypePrefix(comptime name: [:0]const u8) []const u8 {
     }
 }
 
-fn checkForDuplicateComponents(comptime templates: anytype, comptime templates_info: StructInfo) void {
+fn checkForDuplicateComponents(comptime templates: anytype) void {
     comptime {
         for (templates_info.names) |template_name| {
             const Template = @field(templates, template_name);
@@ -59,7 +58,7 @@ fn checkForDuplicateComponents(comptime templates: anytype, comptime templates_i
 pub fn World(comptime templates: anytype) type {
     const ts_info = comptime structInfo(@TypeOf(templates));
 
-    checkForDuplicateComponents(templates, ts_info);
+    checkForDuplicateComponents(templates);
 
     return struct {
         allocator: std.mem.Allocator,
@@ -83,17 +82,15 @@ pub fn World(comptime templates: anytype) type {
             }
         }
 
-        fn getTemplateData(storage: *const StorageType(), comptime T: type) *std.MultiArrayList(T) {
-            comptime {
-                const info = structInfo(StorageType());
-                for (info.names, info.types) |name, U| {
-                    if (T == U) {
-                        return &@field(storage, name);
-                    }
+        fn getTemplateData(storage: *StorageType(), comptime T: type) *T {
+            const info = comptime structInfo(StorageType());
+            inline for (info.names, info.types) |name, U| {
+                if (T == U) {
+                    return &@field(storage, name);
                 }
-
-                @compileError(@typeName(T) ++ " is not in any template");
             }
+
+            @compileError(@typeName(T) ++ " is not in any template");
         }
 
         fn initTemplatesStorage() StorageType() {
@@ -126,22 +123,23 @@ pub fn World(comptime templates: anytype) type {
         }
 
         pub fn spawn(self: *@This(), data: anytype) !Entity {
-            const Template = @TypeOf(data);
+            const T = @TypeOf(data);
 
             comptime var matched = false;
-            inline for (ts_info.types) |T| {
+            inline for (ts_info.types) |Template| {
+                @compileLog(Template);
                 if (T == Template) {
                     matched = true;
                     break;
                 }
             }
             if (!matched) {
-                @compileError("data of type " ++ @typeName(Template) ++ " does not match any template");
+                @compileError("data of type " ++ @typeName(T) ++ " does not match any template");
             }
 
             var template_data = getTemplateData(
                 self.storage,
-                Template,
+                T,
             );
 
             try template_data.append(self.allocator, data);
@@ -151,7 +149,7 @@ pub fn World(comptime templates: anytype) type {
             const entity = self.next_entity;
 
             try self.entity_locations.put(entity, .{
-                .Template = Template,
+                .Template = T,
                 .entity_idx = entity_pos_idx,
             });
 

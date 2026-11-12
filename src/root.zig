@@ -4,6 +4,6 @@ test {
     _ = @import("tests.zig");
 }
 
-pub const reg = @import("registry.zig");
-pub const Registry = reg.Registry;
-pub const EntityID = reg.EntityID;
+pub const world = @import("world.zig");
+pub const World = world.World;
+pub const Entity = world.Entity;
