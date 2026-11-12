@@ -29,7 +29,7 @@ const UI = struct {
 test "spawn" {
     const alcr = testing.allocator;
 
-    var world = try compt.World(.{ Player, Tree, UI }).init(alcr);
+    var world = try compt.World(&.{ Player, Tree, UI }).init(alcr);
     defer world.deinit();
 
     const player = try world.spawn(Player{
@@ -62,17 +62,17 @@ test "spawn" {
     try expectEqual(2, world.storage.@"1".len); // 2 trees
     try expectEqual(1, world.storage.@"2".len); // 1 ui element
 
-    try expectEqual(Player, world.entity_locations.get(player).?.Template);
-    try expectEqual(0, world.entity_locations.get(player).?.entity_idx);
+    try expectEqual(0, world.entity_locations.get(player).?.template_idx);
+    try expectEqual(0, world.entity_locations.get(player).?.idx);
 
-    try expectEqual(Tree, world.entity_locations.get(tree1).?.Template);
-    try expectEqual(0, world.entity_locations.get(tree1).?.entity_idx);
+    try expectEqual(1, world.entity_locations.get(tree1).?.template_idx);
+    try expectEqual(0, world.entity_locations.get(tree1).?.idx);
 
-    try expectEqual(Tree, world.entity_locations.get(tree2).?.Template);
-    try expectEqual(0, world.entity_locations.get(tree2).?.entity_idx);
+    try expectEqual(1, world.entity_locations.get(tree2).?.template_idx);
+    try expectEqual(1, world.entity_locations.get(tree2).?.idx);
 
-    try expectEqual(UI, world.entity_locations.get(ui).?.Template);
-    try expectEqual(0, world.entity_locations.get(ui).?.entity_idx);
+    try expectEqual(2, world.entity_locations.get(ui).?.template_idx);
+    try expectEqual(0, world.entity_locations.get(ui).?.idx);
 
     // data stored correctly
     const stored_player = world.storage.@"0".get(0);

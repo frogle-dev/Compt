@@ -1,12 +1,11 @@
 const std = @import("std");
 
 pub const TemplateIdx = usize;
-pub const EntityIdx = usize;
 pub const Entity = u32;
 
 pub const EntityLocation = struct {
-    Template: type,
-    entity_idx: EntityIdx,
+    template_idx: TemplateIdx,
+    idx: usize,
 };
 
 pub const StructInfo = struct {
@@ -22,8 +21,8 @@ fn structInfo(comptime T: type) StructInfo {
 
         return .{
             .names = info.field_names,
-            // .types = info.field_types,
-            // .attrs = info.field_attrs,
+            .types = info.field_types,
+            .attrs = info.field_attrs,
             .len = info.field_names.len,
         };
     }
@@ -38,16 +37,15 @@ fn stripTypePrefix(comptime name: [:0]const u8) []const u8 {
     }
 }
 
-fn checkForDuplicateComponents(comptime templates: anytype) void {
+fn checkForDuplicateComponents(comptime templates: []const type) void {
     comptime {
-        for (templates_info.names) |template_name| {
-            const Template = @field(templates, template_name);
+        for (templates) |Template| {
             const template_info = structInfo(Template);
 
-            for (template_info.types, 0..) |component_type, component_i| {
-                for (template_info.types, 0..) |other_type, other_i| {
-                    if (component_i != other_i and component_type == other_type) {
-                        @compileError("Template '" ++ @typeName(Template) ++ "' has duplicate component type: " ++ @typeName(component_type));
+            for (template_info.types, 0..) |Component, component_i| {
+                for (template_info.types, 0..) |Other, other_i| {
+                    if (component_i != other_i and Component == Other) {
+                        @compileError("Template '" ++ @typeName(Template) ++ "' has duplicate component type: " ++ @typeName(Component));
                     }
                 }
             }
@@ -55,8 +53,8 @@ fn checkForDuplicateComponents(comptime templates: anytype) void {
     }
 }
 
-pub fn World(comptime templates: anytype) type {
-    const ts_info = comptime structInfo(@TypeOf(templates));
+pub fn World(comptime templates: []const type) type {
+    // const ts_info = comptime structInfo(@TypeOf(templates));
 
     checkForDuplicateComponents(templates);
 
@@ -70,11 +68,9 @@ pub fn World(comptime templates: anytype) type {
 
         fn StorageType() type {
             comptime {
-                var types: [ts_info.len]type = undefined;
+                var types: [templates.len]type = undefined;
 
-                for (ts_info.names, 0..) |template_name, template_i| {
-                    const Template = @field(templates, template_name);
-
+                for (templates, 0..) |Template, template_i| {
                     types[template_i] = std.MultiArrayList(Template);
                 }
 
@@ -115,7 +111,7 @@ pub fn World(comptime templates: anytype) type {
         pub fn deinit(self: *@This()) void {
             const storage_info = comptime structInfo(StorageType());
             inline for (storage_info.types) |T| {
-                getTemplateData(self.storage, T)
+                getTemplateData(&self.storage, T)
                     .deinit(self.allocator);
             }
 
@@ -125,11 +121,12 @@ pub fn World(comptime templates: anytype) type {
         pub fn spawn(self: *@This(), data: anytype) !Entity {
             const T = @TypeOf(data);
 
+            comptime var template_idx: TemplateIdx = undefined;
             comptime var matched = false;
-            inline for (ts_info.types) |Template| {
-                @compileLog(Template);
+            inline for (templates, 0..) |Template, i| {
                 if (T == Template) {
                     matched = true;
+                    template_idx = i;
                     break;
                 }
             }
@@ -138,19 +135,19 @@ pub fn World(comptime templates: anytype) type {
             }
 
             var template_data = getTemplateData(
-                self.storage,
-                T,
+                &self.storage,
+                std.MultiArrayList(T),
             );
 
             try template_data.append(self.allocator, data);
 
-            const entity_pos_idx = template_data.len - 1;
+            const pos_idx = template_data.len - 1;
 
             const entity = self.next_entity;
 
             try self.entity_locations.put(entity, .{
-                .Template = T,
-                .entity_idx = entity_pos_idx,
+                .template_idx = template_idx,
+                .idx = pos_idx,
             });
 
             self.next_entity += 1;
@@ -216,9 +213,9 @@ pub fn World(comptime templates: anytype) type {
 
             const View = QueryView(has);
 
-            comptime var matched_templates: [ts_info.len]type = undefined;
+            comptime var matched_templates: [templates.len]type = undefined;
             comptime var matched_count: usize = 0;
-            inline for (ts_info.types, 0..) |Template, i| {
+            inline for (templates, 0..) |Template, i| {
                 if (templateMatches(
                     not,
                     has,
@@ -240,6 +237,8 @@ pub fn World(comptime templates: anytype) type {
                     // all the slices in the view are the same size
                     return self.data_view.@"0".len;
                 }
+
+                // TODO: get function that mirrors std.MultiArrayList get function
 
                 pub fn getComponents(self: *@This(), comptime Component: type) [matched_count][]Component {
                     const info = comptime structInfo(View);
