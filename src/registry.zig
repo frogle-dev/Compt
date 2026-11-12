@@ -173,34 +173,6 @@ pub fn World(comptime templates: anytype) type {
             return @Tuple(&types);
         }
 
-        pub fn Query(comptime has: anytype) type {
-            const View = QueryView(has);
-
-            return struct {
-                data_view: View, // TODO: make this an array of views for each matched archetype
-
-                pub fn len(self: *const @This()) usize {
-                    // all the slices in the view are the same size
-                    return self.data_view.@"0".len;
-                }
-
-                pub fn getComponents(self: *@This(), comptime Component: type) []Component {
-                    const info = comptime structInfo(View);
-
-                    inline for (info.names, info.types) |name, ArrType| {
-                        // slice must be removed for original type
-                        const Type = std.meta.Child(ArrType);
-
-                        if (Type == Component) {
-                            return @field(self.data_view, name);
-                        }
-                    }
-
-                    @compileError(@typeName(Component) ++ " does not match any components in the query");
-                }
-            };
-        }
-
         fn templateMatches(
             comptime not: anytype,
             comptime has: anytype,
@@ -240,62 +212,80 @@ pub fn World(comptime templates: anytype) type {
             return true;
         }
 
-        /// Queries for component types within the templates
-        /// has - tuple of types, what components a template must have
-        /// not - tuple of types, what components a template must not have
-        ///
-        /// EX: query(.{Position, Velocity}, .{Attack}, .{Health})
-        pub fn query(self: *@This(), comptime has: anytype, comptime not: anytype) !Query(has) {
+        pub fn Query(comptime has: anytype, comptime not: anytype) type {
             const has_info = structInfo(@TypeOf(has)); // {Position, Velocity}
             const not_info = structInfo(@TypeOf(not)); // {Attack}
 
-            const result_query: Query(has) = .{};
-            inline for (ts_info.types) |Template| {
-                comptime {
-                    if (!templateMatches(
-                        not,
-                        has,
-                        not_info,
-                        has_info,
-                        Template,
-                    )) {
-                        continue;
-                    }
+            const View = QueryView(has);
+
+            comptime var matched_templates: [ts_info.len]type = undefined;
+            comptime var matched_count: usize = 0;
+            inline for (ts_info.types, 0..) |Template, i| {
+                if (templateMatches(
+                    not,
+                    has,
+                    not_info,
+                    has_info,
+                    Template,
+                )) {
+                    matched_templates[i] = Template;
+                    matched_count = i;
+                }
+            }
+
+            return struct {
+                const matched: [matched_count]type = matched_templates[0..matched_count];
+
+                data_view: [matched_count]View,
+
+                pub fn len(self: *const @This()) usize {
+                    // all the slices in the view are the same size
+                    return self.data_view.@"0".len;
                 }
 
-                // get found data
+                pub fn getComponents(self: *@This(), comptime Component: type) [matched_count][]Component {
+                    const info = comptime structInfo(View);
+
+                    var components: [matched_count][]Component = undefined;
+
+                    inline for (0..matched_count) |i| {
+                        inline for (info.names, info.types) |name, ArrType| {
+                            // slice must be removed for original type
+                            const Type = std.meta.Child(ArrType);
+
+                            if (Type == Component) {
+                                components[i] = @field(self.data_view, name);
+                            }
+                        }
+
+                        @compileError(@typeName(Component) ++ " does not match any components in the query");
+                    }
+
+                    return components;
+                }
+            };
+        }
+
+        /// queries for component types within the templates
+        /// has - tuple of types, what components a template must have
+        /// not - tuple of types, what components a template must not have
+        ///
+        /// EX: query(.{Position, Velocity}, .{Attack})
+        pub fn query(self: *@This(), comptime has: anytype, comptime not: anytype) !Query(has, not) {
+            const has_info = structInfo(@TypeOf(has));
+
+            const Q = Query(has, not);
+
+            const result_query: Q = .{};
+            inline for (Q.matched, 0..) |Template, i| {
                 var template_data = getTemplateData(
                     self.storage,
                     Template,
                 );
 
                 inline for (has_info.types) |C| {
-                    result_query.getComponents(C).* = template_data.items(C);
+                    (result_query.getComponents(C).*)[i] = template_data.items(C);
                 }
-
-                // for (0..template_data.len) |entity_i| {
-                //     const Element = QueryElement(has);
-                //     const element_info = comptime structInfo(Element);
-                //
-                //     var query_element: Element = undefined;
-                //
-                //     inline for (element_info.names, element_info.types) |name, QueryComponent| {
-                //         // QueryComponent is an ?*, so those need to be removed to get the original type
-                //         const Component = std.meta.Child(std.meta.Child(QueryComponent));
-                //
-                //         const query_data = @field(query_element, name);
-                //
-                //         // 'has' field
-                //         if (query_data) {
-                //             const FieldEnum = comptime std.meta.FieldEnum(Template);
-                //             const field_tag = comptime std.meta.stringToEnum(FieldEnum, name).?;
-                //             const slice = template_data.items(field_tag);
-                //             query_data = &slice[entity_i];
-                //         }
-                //     }
-                //
-                //     try query_element_soa.append(self.allocator, query_element);
-                // }
             }
 
             return result_query;
