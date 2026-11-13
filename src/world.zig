@@ -54,8 +54,6 @@ fn checkForDuplicateComponents(comptime templates: []const type) void {
 }
 
 pub fn World(comptime templates: []const type) type {
-    // const ts_info = comptime structInfo(@TypeOf(templates));
-
     checkForDuplicateComponents(templates);
 
     return struct {
@@ -78,10 +76,21 @@ pub fn World(comptime templates: []const type) type {
             }
         }
 
-        fn getTemplateData(storage: *StorageType(), comptime T: type) *T {
+        fn getTemplateData(storage: *StorageType(), comptime T: type) *std.MultiArrayList(T) {
             const info = comptime structInfo(StorageType());
             inline for (info.names, info.types) |name, U| {
-                if (T == U) {
+                if (std.MultiArrayList(T) == U) {
+                    return &@field(storage, name);
+                }
+            }
+
+            @compileError(@typeName(T) ++ " is not in any template");
+        }
+
+        fn getConstTemplateData(storage: *const StorageType(), comptime T: type) *const std.MultiArrayList(T) {
+            const info = comptime structInfo(StorageType());
+            inline for (info.names, info.types) |name, U| {
+                if (std.MultiArrayList(T) == U) {
                     return &@field(storage, name);
                 }
             }
@@ -92,9 +101,8 @@ pub fn World(comptime templates: []const type) type {
         fn initTemplatesStorage() StorageType() {
             var storage: StorageType() = undefined;
 
-            const storage_info = comptime structInfo(StorageType());
-            inline for (storage_info.types) |T| {
-                getTemplateData(&storage, T).* = .empty;
+            inline for (templates) |Template| {
+                getTemplateData(&storage, Template).* = .empty;
             }
 
             return storage;
@@ -109,13 +117,21 @@ pub fn World(comptime templates: []const type) type {
         }
 
         pub fn deinit(self: *@This()) void {
-            const storage_info = comptime structInfo(StorageType());
-            inline for (storage_info.types) |T| {
-                getTemplateData(&self.storage, T)
+            inline for (templates) |Template| {
+                getTemplateData(&self.storage, Template)
                     .deinit(self.allocator);
             }
 
             self.entity_locations.deinit();
+        }
+
+        pub fn isCorrectLengths(self: *const @This()) bool {
+            var sum: usize = 0;
+            inline for (templates) |Template| {
+                sum += getConstTemplateData(&self.storage, Template).len;
+            }
+
+            return sum == self.entity_locations.count();
         }
 
         pub fn spawn(self: *@This(), data: anytype) !Entity {
@@ -136,7 +152,7 @@ pub fn World(comptime templates: []const type) type {
 
             var template_data = getTemplateData(
                 &self.storage,
-                std.MultiArrayList(T),
+                T,
             );
 
             try template_data.append(self.allocator, data);

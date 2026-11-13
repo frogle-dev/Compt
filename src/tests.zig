@@ -1,6 +1,8 @@
 const std = @import("std");
+
 const testing = std.testing;
 const expectEqual = testing.expectEqual;
+const expect = testing.expect;
 
 const compt = @import("root.zig");
 
@@ -33,24 +35,24 @@ test "spawn" {
     defer world.deinit();
 
     const player = try world.spawn(Player{
-        .position = .{ .x = 0, .y = 10 },
-        .velocity = .{ .x = 0, .y = 10 },
-        .health = .{ .max = 100, .val = 100 },
-        .attack = .{ .val = 15 },
+        .position = .{ .x = 11, .y = 12 },
+        .velocity = .{ .x = 13, .y = 14 },
+        .health = .{ .max = 15, .val = 16 },
+        .attack = .{ .val = 17 },
     });
 
     const tree1 = try world.spawn(Tree{
-        .position = .{ .x = 0, .y = 0 },
-        .health = .{ .max = 50, .val = 50 },
+        .position = .{ .x = 21, .y = 22 },
+        .health = .{ .max = 50, .val = 40 },
     });
 
     const tree2 = try world.spawn(Tree{
-        .position = .{ .x = 0, .y = 0 },
-        .health = .{ .max = 50, .val = 50 },
+        .position = .{ .x = 31, .y = 32 },
+        .health = .{ .max = 60, .val = 45 },
     });
 
     const ui = try world.spawn(UI{
-        .position = .{ .x = 0, .y = 100 },
+        .position = .{ .x = 41, .y = 100 },
     });
 
     try expectEqual(0, player);
@@ -58,27 +60,41 @@ test "spawn" {
     try expectEqual(2, tree2);
     try expectEqual(3, ui);
 
-    try expectEqual(1, world.storage.@"0".len); // 1 player
-    try expectEqual(2, world.storage.@"1".len); // 2 trees
-    try expectEqual(1, world.storage.@"2".len); // 1 ui element
+    try expectEqual(1, world.storage.@"0".len);
+    try expectEqual(2, world.storage.@"1".len);
+    try expectEqual(1, world.storage.@"2".len);
 
     try expectEqual(0, world.entity_locations.get(player).?.template_idx);
     try expectEqual(0, world.entity_locations.get(player).?.idx);
-
     try expectEqual(1, world.entity_locations.get(tree1).?.template_idx);
     try expectEqual(0, world.entity_locations.get(tree1).?.idx);
-
     try expectEqual(1, world.entity_locations.get(tree2).?.template_idx);
     try expectEqual(1, world.entity_locations.get(tree2).?.idx);
-
     try expectEqual(2, world.entity_locations.get(ui).?.template_idx);
     try expectEqual(0, world.entity_locations.get(ui).?.idx);
 
-    // data stored correctly
     const stored_player = world.storage.@"0".get(0);
-    try expectEqual(0, stored_player.position.x);
-    try expectEqual(10, stored_player.position.y);
-    try expectEqual(100, stored_player.health.val);
+    try expectEqual(11, stored_player.position.x);
+    try expectEqual(12, stored_player.position.y);
+    try expectEqual(13, stored_player.velocity.x);
+    try expectEqual(14, stored_player.velocity.y);
+    try expectEqual(15, stored_player.health.max);
+    try expectEqual(16, stored_player.health.val);
+    try expectEqual(17, stored_player.attack.val);
+
+    const stored_tree1 = world.storage.@"1".get(0);
+    try expectEqual(21, stored_tree1.position.x);
+    try expectEqual(40, stored_tree1.health.val);
+
+    const stored_tree2 = world.storage.@"1".get(1);
+    try expectEqual(31, stored_tree2.position.x);
+    try expectEqual(45, stored_tree2.health.val);
+
+    const stored_ui = world.storage.@"2".get(0);
+    try expectEqual(41, stored_ui.position.x);
+    try expectEqual(100, stored_ui.position.y);
+
+    try expect(world.isCorrectLengths());
 }
 
 // test "query" {
